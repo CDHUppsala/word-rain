@@ -1,6 +1,6 @@
 ## Word rain
 
-Code for generating word rains (= an update of the word cloud)
+Code for generating word rains (= a version of the word cloud visualisation of texts)
 
 ### Installations
 For a conda environment, the following is needed
@@ -18,4 +18,13 @@ conda install nltk
 conda install matplotlib
 
 ### Running 
-See the `visualise_climate_texts.py` for an example example of how it the code in `visualise_climate_texts.py` in `wordrain` is to be used.
+See the `visualise_climate_texts.py` for an example of how the code in `wordrain/visualise_climate_texts.py` is to be used.
+
+You need a word2vec space, a stop word list and a corpus containing several sub-corpora. The folder CORPUS_FOLDER should contain sub-folders, which each of them contain the sub-corpora to be visualised. The sub-folders, in turn, contain (one or several) .txt-files, where the corpus is stored. The folder "swedish-climate-texts", gives an example of this structure.
+
+```
+WORD_SPACE_PATH = "../../../wordspaces/69/model.bin"
+STOP_WORDS_LIST = "swedish_stopwords_climate.txt"
+CORPUS_FOLDER = "swedish-climate-texts"
+OUTPUT_FOLDER = "images_climate"
+```
