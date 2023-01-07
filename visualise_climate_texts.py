@@ -20,4 +20,4 @@ if __name__ == '__main__':
     
     word2vec_model = gensim.models.KeyedVectors.load_word2vec_format(WORD_SPACE_PATH, binary=True, unicode_errors='ignore')
         
-    generate_wordrain.generate_clouds(CORPUS_FOLDER, word2vec_model, output_folder = OUTPUT_FOLDER, stopwords = all_stopwords, x_length_factor = 12, run_data = [("", (1, 2), 500)], display_log = True)
+    generate_wordrain.generate_clouds(CORPUS_FOLDER, word2vec_model, output_folder = OUTPUT_FOLDER, stopwords = all_stopwords, x_length_factor = 3.5, run_data = [("", (1, 2), 200)], display_log = True)
