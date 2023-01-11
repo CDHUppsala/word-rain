@@ -21,15 +21,27 @@ import unicodedata
 import math
 
 NR_TEXTS_TO_INCLUDE_FROM_BACKGROUND = 10000
-NR_OF_WORDS_TO_SHOW = 100
+NR_OF_WORDS_TO_SHOW = 300
+NGRAMS = (1,2)
 FONTSIZE = 16
 X_STRETCH = 30 # How much to make the x-coordinates wider
 X_LENGTH = 10 # Default value for determine if two texts colide x-wise (typically changed for different corpora, then the default is not used)
 Y_LENGTH = 10 # Determines if two texts colide y-wise, and how much to move, when the texts collide
 DEBUG = False
 
+#https://stackoverflow.com/questions/24581194/matplotlib-text-bounding-box-dimensions
+
 matplotlib.rcParams["font.family"] = "monospace"
 
+def get_idf_indicator(idf):
+    if idf:
+        return ""
+    else:
+        return "-tf-only"
+        
+def construct_pdf_file_name(input_name, idf):
+    return input_name.lower().replace(" ", "-").replace(":", "_").replace("å", "ao").replace("ö", "oo").replace("ä", "aa") + get_idf_indicator(idf) + ".pdf"
+    
 # Very simple compound spitting, not really language independent, but also not very well adapted to any language
 def get_compound_vector(word, word2vec_model):
     return_vector = None
@@ -103,9 +115,9 @@ def is_point_in_bounding_box(point_x, point_y,\
                 
 
 
-def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, extreme_values_tuple = None, extra = "", display_log = False):
-
+def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, min_score, fig, new_words, extra, y_length_factor, fontsize, same_y_axis, plot_nr, mark_new_words, extreme_values_tuple=None):
     
+    print("Do plot for: ", title)
     if extreme_values_tuple:
         if DEBUG:
             extreme_marker_color = "red"
@@ -114,8 +126,14 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
             
         global_point_x_overall_min, global_point_x_overall_max, \
                 global_point_y_overall_min, global_point_y_overall_max, global_point_x_overall_max_with_text = extreme_values_tuple
-        plt.scatter(global_point_x_overall_min - x_length_factor*FONTSIZE, global_point_y_overall_min, zorder = -100000,  color = extreme_marker_color, marker = ".")
-        plt.scatter(global_point_x_overall_max_with_text, global_point_y_overall_max, zorder = -100000,  color = extreme_marker_color, marker = ".")
+        
+        if same_y_axis:
+            plt.scatter(global_point_x_overall_min - x_length_factor*fontsize, global_point_y_overall_min, zorder = -100000,  color = extreme_marker_color, marker = ".")
+            plt.scatter(global_point_x_overall_max_with_text, global_point_y_overall_max, zorder = -100000,  color = extreme_marker_color, marker = ".")
+        else:
+            plt.scatter(global_point_x_overall_min - x_length_factor*fontsize, 0, zorder = -100000,  color = extreme_marker_color, marker = ".")
+            
+            plt.scatter(global_point_x_overall_max_with_text, 0, zorder = -100000,  color = extreme_marker_color, marker = ".")
              
 
 
@@ -136,21 +154,27 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
         
     previous_points = []
     for score, word in sorted_word_scores_vec[:nr_of_words_to_show]:
-        fs = FONTSIZE*score/max_score
+        fontsize_base = fontsize
+        if fontsize > max_score:
+            fontsize_base = max_score
+                
+        fs = fontsize_base*score/max_score
         
-        if display_log:
-            fs = FONTSIZE*(math.log(score/max_score*100)/10)
         if word in word_vec_dict:
             word_to_display = word.replace(" ", "_")
             
+            if plot_nr != 0 and mark_new_words and word in new_words:
+                word_to_display = "*" + word_to_display.upper() + "*"
+    
             point_x = word_vec_dict[word][0]
             point_y = word_vec_dict[word][1]
             
             point_x = point_x * X_STRETCH
             #fontsize_to_use = max(fs, 1) #- 0.4*len(word_to_display)
-            fontsize_to_use = fs - 0.2*len(word_to_display)
+            fontsize_to_use = fs# - 0.2*len(word_to_display)
             if fontsize_to_use < 0:
                 fontsize_to_use = fs
+            
             
             point_x_before = point_x
             point_y_before = point_y
@@ -176,8 +200,8 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
                         
                     
                     
-                    right_upper_max_point_y = point_y + Y_LENGTH*fontsize_to_use
-                    left_upper_max_point_y = point_y + Y_LENGTH*fontsize_to_use
+                    right_upper_max_point_y = point_y + y_length_factor*fontsize_to_use
+                    left_upper_max_point_y = point_y + y_length_factor*fontsize_to_use
                     right_lower_max_point_y = point_y
                 
                     # Check if new point is in bounding box of prev
@@ -256,14 +280,10 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
                 if point_y_before_loop == point_y:
                     changed = False
    
-            min_point = (point_x, point_y)
             
-            # Use original fontsize, not word length adapted
-            max_point = (max_point_x, point_y + Y_LENGTH*fs)
-            previous_points.append({"min": min_point, "max": max_point})
    
                          
-            y_bar_start = Y_LENGTH*FONTSIZE/2 # TODO: Make y_bar_start corpus independent
+            y_bar_start = y_length_factor*fontsize_base/2
             cmap_value = ((point_x/X_STRETCH)/100 + 1)/2 # Not used when actually plotting
             if extreme_values_tuple:
                 cmap_value = (point_x - global_point_x_overall_min)/(global_point_x_overall_max - global_point_x_overall_min)
@@ -272,51 +292,79 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
             
             
             # The bar upwards
-            # TODO: Make the length of the bar (including the log version) more corpus-independent
-            y_bar_length = score/max_score*FONTSIZE*Y_LENGTH*5#*nr_of_words_to_show/100
-            if display_log:
-                y_bar_length = math.log(y_bar_length, 1.02)/1.5
+            y_bar_length = fs*y_length_factor*x_length_factor#*nr_of_words_to_show/100
             upwardbar_end = y_bar_start + y_bar_length
             
-            linewidth=score/max_score
-            if display_log:
-                linewidth = math.log(score/max_score*100)/10
-                
+            linewidth= fs/fontsize # score/max_score
+  
             plt.plot([point_x, point_x], [y_bar_start, upwardbar_end], color=cmap(cmap_value), zorder = -1000-z_order_text, linewidth=linewidth)
-            plt.scatter(point_x, upwardbar_end, zorder = -100000, color=cmap(cmap_value), marker = "o", s=fontsize_to_use*0.4*score/max_score)
+            plt.scatter(point_x, upwardbar_end, zorder = -100000, color=cmap(cmap_value), marker = "o", s=score/max_score)
             
             
             # The texts have been changed to be printed downwards instead
             negative_text_y = -point_y
             
-            #plt.plot([point_x, max_point_x], [-point_y, -point_y + Y_LENGTH*fontsize_to_use], color="red", linewidth = 0.1)
-            if DEBUG:
-                plt.plot([point_x, max_point_x], [negative_text_y, -max_point[1]], color="red", linewidth = 0.1)
-
-            
-            # The text
             if times_found_dict[word] == nr_of_texts:
                 style = "normal" # found in all texts
             else:
                 style = "italic"
-            if times_found_dict[word] == 1: # only in this text
+                
+            if times_found_dict[word] == 1: # only occurs in this text
                 fontweight = "bold"
             else:
                 fontweight = "normal"
                 
-            #text_color = (0.0, 0.0, 0.0, min(1.0, 2*score/max_score))
+            
             text_color = (0.0, 0.0, 0.0)
+            #if word in new_words:
+            #    print(word_to_display)
+            #    print("-----")
+                
             t = plt.text(point_x, negative_text_y, word_to_display, zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=style, fontweight=fontweight, verticalalignment="top")
             
             
+            max_point_y = point_y + y_length_factor*fs # Use original fontsize, not word length adapted
+            
+            bbox = t.get_window_extent(renderer = fig._get_renderer()) #.inverse_transformed(plt.gca().transData)
+            transf = plt.gca().transData.inverted()
+            bb_datacoords = bbox.transformed(transf)
+            x_length_from_bbox = bb_datacoords.x1 - bb_datacoords.x0
+            y_length_from_bbox = bb_datacoords.y1 - bb_datacoords.y0
+            
+            y_length_estimate = max_point_y - point_y
+            x_length_estimate = max_point_x - point_x
+            
+            # If bbox estimation for word is larger than the manual one, use that one
+            if x_length_from_bbox > x_length_estimate:
+                max_point_x = point_x + x_length_from_bbox
+                #print("x_length_from_bbox", x_length_from_bbox)
+                #print("x_length_estimate", x_length_estimate)
+                
+            if y_length_from_bbox > y_length_estimate:
+                max_point_y = point_y + y_length_from_bbox
+                #print("y_length_from_bbox", y_length_from_bbox)
+                #print("y_length_estimate", y_length_estimate)
+            
+                
+            min_point = (point_x, point_y)
+            max_point = (max_point_x, max_point_y)
+            previous_points.append({"min": min_point, "max": max_point})
+            
+
+            if DEBUG:
+                #plt.plot([point_x, max_point_x], [negative_text_y, -max_point[1]], color="red", linewidth = 0.1)
+                plt.plot([point_x, point_x, max_point_x, max_point_x, point_x],
+                [-point_y, -max_point_y, -max_point_y, -point_y, -point_y], linewidth = 0.1)
+    
             # The bar downwards
-            plt.plot([point_x, point_x], [y_bar_start, negative_text_y], color=color_lighter, linewidth=0.1*score/max_score, zorder = -10000000)
+            plt.plot([point_x, point_x], [y_bar_start, negative_text_y], color=color_lighter, linewidth=0.1*score/max_score/fs, zorder = -10000000)
             plt.scatter(point_x, negative_text_y, zorder = -100000, color=color_lighter_lighter, marker = "o", s=fontsize_to_use*0.05)
             
             z_order_text =  z_order_text - 1
             #fs = fs - 0.6*score/max_score
             
-            min_y_used = negative_text_y - Y_LENGTH*fontsize_to_use
+            
+            min_y_used = negative_text_y - y_length_factor*fontsize_to_use
             max_y_used = upwardbar_end + fontsize_to_use
             if min_y_used < point_y_overall_min:
                 point_y_overall_min = min_y_used
@@ -337,26 +385,22 @@ def do_plot(word_vec_dict, word_list, sorted_word_scores_vec, picname, title, nr
             print("Word not found, strange", word)
         word_nr = word_nr + 1
 
+    x_width =  point_x_overall_max - point_x_overall_min
     title_to_use = "\n" + title + extra
-    if picname != "":
-        title_to_use = title + ", " + picname
-    title_fontsize=FONTSIZE
-    if display_log:
-        title_fontsize=math.log(100*FONTSIZE) # TODO: Make this more general
+    title_fontsize = x_width/math.log(len(title_to_use))/100
     plt.title(title_to_use, fontsize=title_fontsize)
 
     return (point_x_overall_min, point_x_overall_max, point_y_overall_min, point_y_overall_max, point_x_overall_max_with_text)
 
 
-def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_model, picname, ngram_range, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, display_log):
+def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_model, ngram_range, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, y_length_factor, fontsize, same_y_axis, mark_new_words):
     
     if idf:
         extra = ""
     else:
         extra = "-tf-only"
-            
-    if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
+        
+    
     TEXTS_FOLDER = "texts"
     texts_output = os.path.join(output_folder, TEXTS_FOLDER)
     if not os.path.exists(texts_output):
@@ -374,18 +418,22 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
     
     sorted_word_scores_matrix = []
     all_words = []
+    
     for el, w, name in zip(inversed, X, names):
         score_vec = w.toarray()[0]
         word_scord_vec = []
         for word in el:
             all_words.append(word)
             word_scord_vec.append((score_vec[vectorizer.vocabulary_[word]], word))
+            
+            
         word_scord_vec = sorted(word_scord_vec, reverse=True)
         sorted_word_scores_matrix.append(word_scord_vec)
         
+        
+        
     
-        
-        
+    
     # For tsne
     ##########
     vectorizer_for_tsne = TfidfVectorizer(stop_words=stopwords, smooth_idf=False, sublinear_tf=False, ngram_range = ngram_range, use_idf=idf)
@@ -396,10 +444,15 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
     word_to_use_set = set()
     times_found_dict = {}
     max_scores = []
-    
+    min_scores = []
+        
+    new_words_lists = []
+    previous_words_set = set()
     for sws, title in zip(sorted_word_scores_matrix, names):
         # Write scores to file
         max_score_subcorpus = -math.inf
+        min_score_subcorpus = math.inf
+        new_words_list = []
         tf_name = os.path.join(texts_output, title + extra + ".txt")
         with open(tf_name, "w") as tf_write:
             for s, w in sws[:nr_of_words_to_show]:
@@ -412,7 +465,18 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
                 
                 if s > max_score_subcorpus:
                     max_score_subcorpus = s
+                if s < min_score_subcorpus:
+                    min_score_subcorpus = s
+                
+                # For checking if a word is one not in previous corpora
+                if w not in previous_words_set:
+                    new_words_list.append(w)
+                previous_words_set.add(w)
+                
+        new_words_lists.append(new_words_list)
         max_scores.append(max_score_subcorpus)
+        min_scores.append(min_score_subcorpus)
+    
     
     all_vectors_list = []
     found_words = []
@@ -477,11 +541,11 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
     global_point_y_overall_max = -math.inf
     
     # Make one first run, just to get the global max and min point (but don't save the result)
-    for inverse, sorted_word_scores, title, max_score in zip(inversed, sorted_word_scores_matrix, names, max_scores):
+    for inverse, sorted_word_scores, title, max_score, min_score, new_words, plot_nr in zip(inversed, sorted_word_scores_matrix, names, max_scores, min_scores, new_words_lists, range(0, len(names))):
         main_fig = plt.figure()
         plt.axis('off')
         point_x_overall_min, point_x_overall_max, point_y_overall_min, point_y_overall_max, point_x_overall_max_with_text = \
-            do_plot(word_vec_dict, inverse, sorted_word_scores, picname, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, extra=extra, display_log = display_log)
+            do_plot(word_vec_dict, inverse, sorted_word_scores, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, min_score, main_fig, new_words, extra=extra, fontsize=fontsize, y_length_factor=y_length_factor, plot_nr = plot_nr, same_y_axis = same_y_axis, mark_new_words=mark_new_words)
             
         if point_x_overall_min < global_point_x_overall_min:
             global_point_x_overall_min = point_x_overall_min
@@ -500,17 +564,13 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
                 global_point_y_overall_min, global_point_y_overall_max, global_point_x_overall_max_with_text)
                 
     # Make one another run and save the results in images
-    for inverse, sorted_word_scores, title, max_score in zip(inversed, sorted_word_scores_matrix, names, max_scores):
+    for inverse, sorted_word_scores, title, max_score, new_words, plot_nr in zip(inversed, sorted_word_scores_matrix, names, max_scores, new_words_lists, range(0, len(names))):
         main_fig = plt.figure()
         plt.axis('off')
         
-        do_plot(word_vec_dict, inverse, sorted_word_scores, picname, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, extreme_values_tuple = extreme_values_tuple, extra = extra, display_log = display_log)
+        do_plot(word_vec_dict, inverse, sorted_word_scores, title, nr_of_words_to_show, x_length_factor, times_found_dict, nr_of_texts, max_score, min_score, main_fig, new_words, extra = extra, fontsize=fontsize, y_length_factor=y_length_factor, plot_nr = plot_nr, same_y_axis = same_y_axis, mark_new_words=mark_new_words, extreme_values_tuple = extreme_values_tuple)
  
-        file_name = os.path.join(output_folder, title.replace(" ", "-"))
-        if picname != "":
-            file_name = file_name + "-" + picname.replace(" ", "-")
-        file_name = file_name + extra + ".pdf"
-        
+        file_name = os.path.join(output_folder, construct_pdf_file_name(title, idf))
         plt.tight_layout()
         plt.savefig(file_name, orientation = "landscape", format="pdf", bbox_inches='tight', pad_inches=0)
         print("Saved plot in " + file_name)
@@ -520,7 +580,7 @@ def vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_mode
 ####
 # The main function for generating the clouds
 ####
-def generate_clouds(corpus_folder, word2vec_model, output_folder, x_length_factor = X_LENGTH, stopwords=[], background_corpus=[], run_data = [("1-gram", (1, 1), NR_OF_WORDS_TO_SHOW), ("2-gram", (2,2), NR_OF_WORDS_TO_SHOW)], pre_process_method = None, idf = True, extra_words_path = None, display_log = False):
+def generate_clouds(corpus_folder, word2vec_model, output_folder, ngrams=NGRAMS, nr_of_words_to_show = NR_OF_WORDS_TO_SHOW, x_length_factor = X_LENGTH, stopwords=[], background_corpus=[], pre_process_method = None, idf = True, extra_words_path = None, y_length_factor = Y_LENGTH, fontsize=FONTSIZE, same_y_axis=True, mark_new_words=False):
 
     extra_words = []
     if extra_words_path:
@@ -536,14 +596,56 @@ def generate_clouds(corpus_folder, word2vec_model, output_folder, x_length_facto
     names = []
     texts = []
   
+    folder_title = os.path.basename(corpus_folder)
     folders = glob.glob(os.path.join(corpus_folder, "*", ""))
     if len(folders) == 0:
         print("no subfolders found in ", corpus_folder)
         exit()
         
-    for folder in folders:
+
+    folder_names = []
+    for fn in folders:
+        folder_name = unicodedata.normalize("NFC", os.path.basename(os.path.split(fn)[0]))
+        folder_name_numeric = []
+        
+        for character in folder_name:
+            if character.isnumeric():
+                folder_name_numeric.append(character)
+            else:
+                break
+        print(folder_name_numeric, folder_name_numeric)
+        if folder_name_numeric != []:
+            folder_names.append((float("".join(folder_name_numeric)), folder_name, fn))
+        else:
+            folder_names.append((folder_name, folder_name, fn))
+    
+    folder_names.sort()
+   
+    if not os.path.exists(output_folder):
+        os.mkdir(output_folder)
+        
+    tex_str = """
+            \\documentclass{beamer}
+            \\usepackage[utf8]{inputenc}
+
+            \\title{
+            """
+    tex_str = tex_str + folder_title
+    tex_str = tex_str + \
+            """
+            }
+            \\author{}
+
+            \\usepackage{graphicx}
+            \\begin{document}
+
+            \\maketitle
+                    
+            """
+ 
+    for number_name, folder_name, folder in folder_names:
         print("Reading files from: ", folder)
-        folder_name = unicodedata.normalize("NFC", os.path.basename(os.path.split(folder)[0]))
+        #folder_name = unicodedata.normalize("NFC", os.path.basename(os.path.split(folder)[0]))
         texts_in_folder = []
         extract_files = glob.glob(os.path.join(folder, "*.txt"))
         print("Nr of found files: ", len(extract_files))
@@ -560,7 +662,24 @@ def generate_clouds(corpus_folder, word2vec_model, output_folder, x_length_facto
         
         texts.append(all_text_in_folder) # all files in folder to one text
         names.append(folder_name)
-   
+        
+        tex_str = tex_str + """
+                            \\begin{frame}
+                            \\includegraphics[width=\\textwidth]{"""
+        tex_str = tex_str + construct_pdf_file_name(folder_name, idf)
+        tex_str = tex_str + """}
+                            \\end{frame}
+                            """
+                            
+                            
+    tex_str = tex_str + """
+                           \end{document}
+                           """
+        
+    tex_output = os.path.join(output_folder, folder_title + get_idf_indicator(idf) + ".tex")
+
+    with open(tex_output, "w") as write_tex:
+        write_tex.write(tex_str)
+        
     # Visualise the texts
-    for (n, ngram_range, nr_of_words_to_show) in run_data:
-        vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_model, n, ngram_range, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, display_log)
+    vectorize_and_plot(background_corpus, texts, names, stopwords, word2vec_model, ngrams, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, y_length_factor, fontsize, same_y_axis, mark_new_words)
