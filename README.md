@@ -3,7 +3,7 @@ Code for generating word rains (= a semantically aware version of the word cloud
 
 Word Rain is a collaboration between, [CDHU](https://www.abm.uu.se/cdhu-eng/), the [National Language Bank of Sweden/CLARIN Knowledge Centre for the Languages of Sweden](https://www.isof.se/other-languages/english/clarin-knowledge-centre-for-the-languages-of-sweden-swelang) at the Language Council of Sweden and the [iVis group](https://ivis.itn.liu.se) at Linköping University.
 
-Example of a word rain IPCC report Climate Change 2021: The Physical Science Basis, Summary for Policymakers, Summary for Policymakers.
+Example of a word rain of the IPCC report: 'Climate Change 2021: The Physical Science Basis, Summary for Policymakers.'
 ![Example of a word rain](word-rain-example.png)
 
 
