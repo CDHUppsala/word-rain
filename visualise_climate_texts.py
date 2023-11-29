@@ -2,7 +2,7 @@ from wordrain import generate_wordrain
 from nltk.corpus import stopwords
 import gensim
 
-# To make sure that a word is contributed only once per text to the statistics
+# Make manual collocations with troligt
 def check_words(text):
     return_text = text.replace(" troligt", "_troligt")
     return return_text
@@ -25,4 +25,4 @@ if __name__ == '__main__':
     
     word2vec_model = gensim.models.KeyedVectors.load_word2vec_format(WORD_SPACE_PATH, binary=True, unicode_errors='ignore')
         
-    generate_wordrain.generate_clouds(CORPUS_FOLDER, word2vec_model, output_folder = OUTPUT_FOLDER, stopwords = all_stopwords, pre_process_method = check_words, x_length_factor = 3.5, same_y_axis=False, mark_new_words=False)
+    generate_wordrain.generate_clouds(CORPUS_FOLDER, word2vec_model, output_folder = OUTPUT_FOLDER, stopwords = all_stopwords, pre_process_method = check_words, fontsize=16)
