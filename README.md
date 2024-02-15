@@ -38,7 +38,7 @@ OUTPUT_FOLDER = "images_climate"
 
 ## Presentations
 - Skeppstedt, M., Aangenendt, G. and Söderfeldt, Y. (2024) ‘Visualizing longitudinal trends in digitized periodicals from the Swedish diabetes association’, Huminfra Conference, Gothenburg, Sweden.  [pdf](https://demo.spraakbanken.gu.se/gerlof/abstract_submissions.pdf)
-- Ahltorp, M. and Hessel, J. and Eriksson, G. and Skeppstedt, M. (2023) “Visualisering av ett lexikons täckning av olika textgenrer”, NFL2023: 17. konferansen om leksikografi i Norden, Bergen. [pdf](https://www.uib.no/sites/w3.uib.no/files/attachments/samandrag-nfl-17.pdf#page=11)
+- Ahltorp, M., Hessel, J., Eriksson, G. and Skeppstedt, M. (2023) “Visualisering av ett lexikons täckning av olika textgenrer”, NFL2023: 17. konferansen om leksikografi i Norden, Bergen. [pdf](https://www.uib.no/sites/w3.uib.no/files/attachments/samandrag-nfl-17.pdf#page=11)
 - Skeppstedt, M. and Ahltorp, M. (2023). “The Words of Climate Change: TF-IDF-based word clouds derived from climate change reports”.  Digital Humanities in the Nordic and Baltic Countries 2023. Digital/Universities of Oslo, Bergen and Stavanger, Norway. 
 
 ## Acknowledgements
