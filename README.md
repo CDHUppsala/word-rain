@@ -41,7 +41,7 @@ Research and development of the Word Rain visualisation is thereby been funded b
 
 ## Installations
 
-See ![requirements.txt](requirements.txt)
+See [requirements.txt](requirements.txt)
 
 For a conda environment, the following is needed
 
@@ -63,8 +63,8 @@ conda install anaconda::reportlab
 
 ## How to cite
 
-```
 If you use the Word Rain code in an academic setting, please cite this publication:
+```
 @article{doi:10.1177/14738716241236188,
 author = {Maria Skeppstedt and Magnus Ahltorp and Kostiantyn Kucher and Matts Lindström},
 title ={From word clouds to Word Rain: Revisiting the classic word cloud to visualize climate change texts},
