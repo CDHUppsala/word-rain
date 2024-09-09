@@ -1,7 +1,7 @@
 # Word Rain
 Code for generating word rains 
 
-![Example of word rains](word-rain-example.png)
+![Example of word rains](word-rain-examples/unified-english-images-climate.png)
 <em>Example of word rains for IPCC reports.</em>
 
 ## Running 
@@ -37,7 +37,7 @@ Research and development of the Word Rain visualisation is thereby been funded b
 
 ## Presentations and blog posts  
 - Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
-- [Ordregn – en utveckling av det klassiska ordmolnet] (https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
+- [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
 
 ## Installations
 
