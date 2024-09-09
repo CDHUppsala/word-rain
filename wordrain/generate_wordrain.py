@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from . import FONT_NORMAL, FONT_EMPHASIZED, FONT_NEWWORD, DEFAULT_FONTSIZE_FALLOFF_RATE
+
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.neighbors import NearestNeighbors
 import os
@@ -10,7 +14,7 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from matplotlib.pyplot import plot, show, bar, grid, axis, savefig, clf
 import matplotlib.markers
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as pyplot
 import matplotlib.font_manager as mfm
 from mpl_toolkits import mplot3d
 import random
@@ -25,26 +29,49 @@ import string
 import hashlib
 from bidi.algorithm import get_display
 import json
-from typing import NamedTuple
+from typing import NamedTuple, Any
+from types import SimpleNamespace
+from matplotlib import font_manager as fm
+import struct
+from io import BytesIO
+from collections import Counter
+import re
+from itertools import chain, islice
+from . import pdfgen
+from .types import WordScore, WordInfo
+from sklearn.cluster import AgglomerativeClustering
+from sklearn.neighbors import NearestCentroid
+import time
+import sys
 
+def flatten_iter(l):
+    return chain.from_iterable(l)
 
 NR_OF_WORDS_TO_SHOW = 300
 NGRAMS = (1,2)
 FONTSIZE = 16
 X_STRETCH = 30 # How much to make the x-coordinates wider
-X_LENGTH = 10 # Default value for determine if two texts colide x-wise (typically changed for different corpora, then the default is not used)
-Y_LENGTH = 10 # Determines if two texts colide y-wise, and how much to move, when the texts collide
 DEBUG = False
-ABOVE_BELOW_RATIO = 2
+DEBUG_VECTORS = False
 letters = list(string.ascii_lowercase) + ['å', 'ä', 'ö', 'ü', 'é', 'ß']
 ALL_FOLDERS_NAME = "all"
-NR_OF_WORDS_IN_BAR_PLOT = 60
 
 #https://stackoverflow.com/questions/24581194/matplotlib-text-bounding-box-dimensions
 
 #matplotlib.rcParams["font.family"] = "monospace"
 #plt.rcParams["pdf.use14corefonts"] = True
 #matplotlib.rc("text", usetex=True)
+
+pdfBackendEnabled = True
+
+def choose_fonts(fontlist):
+    global pdfBackendEnabled
+    pdfBackendEnabled = True
+    pdfgen.registerFonts(fontlist)
+
+def disablePdfBackend():
+    global pdfBackendEnabled
+    pdfBackendEnabled = False
 
 class Point(NamedTuple):
     x: float
@@ -53,10 +80,35 @@ class Point(NamedTuple):
     def scalex(self, scale):
         return Point(self.x * scale, self.y)
 
-class Rect(NamedTuple):
+    def textforward(self, width, params):
+        if params.rtl_text:
+            return Point(self.x - width, self.y)
+        else:
+            return Point(self.x + width, self.y)
+
+    def addy(self, height):
+        return Point(self.x, self.y + height)
+
+class Rect():
     min: Point
     max: Point
-    
+
+    def __init__(self, p0, p1):
+        if p0.x < p1.x:
+            x_min = p0.x
+            x_max = p1.x
+        else:
+            x_min = p1.x
+            x_max = p0.x
+        if p0.y < p1.y:
+            y_min = p0.y
+            y_max = p1.y
+        else:
+            y_min = p1.y
+            y_max = p0.y
+        self.min = Point(x_min, y_min)
+        self.max = Point(x_max, y_max)
+
     def intersects(self, other):
         other_in_me_x = self.min.x <= other.min.x <= self.max.x
         me_in_other_x = other.min.x <= self.min.x <= other.max.x
@@ -64,13 +116,39 @@ class Rect(NamedTuple):
         me_in_other_y = other.min.y <= self.min.y <= other.max.y
         return (other_in_me_x or me_in_other_x) and (other_in_me_y or me_in_other_y)
 
-def get_extra_indicator(idf, ngrams, output_folder):
-    extra = "-n-grams-" + str(ngrams).replace(" ", "") + "-" + output_folder.replace("/", "-").replace("_", "-")
-    if not idf:
-        extra = extra + "-tf-only"
-    else:
-        extra = extra + "-tf-idf"
-    return extra
+    def padded(self, top, right, bottom, left):
+        return Rect(Point(self.min.x-left, self.min.y-bottom), Point(self.max.x+right, self.max.y+top))
+
+    def __str__(self):
+        return "Rect(%f,%f)-(%f,%f)" % (self.min.x, self.min.y, self.max.x, self.max.y)
+
+class WordPlotInfo(NamedTuple):
+    word: str
+    score: float
+    x: float
+    fontsize: float
+    freq: float
+    relfreq: float
+    show: str
+
+    @classmethod
+    def create(cls, word, score, max_score, show, params):
+        return WordPlotInfo(word.word, score, word.x, fontsize_from_score(params, score, max_score), word.freq, word.relfreq,
+                                show)
+
+roman_ten_figures = ",X,XX,XXX,XL,L,LX,LXX,LXXX,XC".split(",")
+roman_one_figures = ",I,II,III,IV,V,VI,VII,VIII,IX".split(",")
+
+def convert_to_roman_plus_one(n):
+    n = n + 1 # start with 1 instead of 0
+    
+    tens = roman_ten_figures[(n % 100) // 10]
+    ones = roman_one_figures[n % 10]
+ 
+    return "%s%s" % (tens, ones)
+    
+def clean_folder_name(output_folder):
+    return output_folder.replace("/", "-").replace("_", "-")
         
         
 def latex_clean(text):
@@ -78,37 +156,29 @@ def latex_clean(text):
     text = ''.join(ch for ch in text if ch.isalnum() or ch in [".", ",", " ", "!", "?", "-", "/"]).strip()
     return text
     
-def construct_pdf_file_name(input_name, idf, ngrams, output_folder):
-    return input_name.lower().replace(" ", "-").replace(":", "_").replace("å", "ao").replace("ö", "oo").replace("ä", "aa") + get_extra_indicator(idf, ngrams, output_folder) + ".pdf"
+def construct_pdf_file_name(input_name, output_folder):
+    return input_name.lower().replace(" ", "-").replace(":", "_").replace("å", "ao").replace("ö", "oo").replace("ä", "aa") + "-" + clean_folder_name(output_folder) + ".pdf"
   
-def word_in_terms_to_emphasize(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-    emphasize_term = word_in_terms_to_emphasize_before_inverse(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams)
-    if terms_to_emphasize_inverse:
+def word_in_terms_to_emphasize(word, params):
+    emphasize_term = word_in_terms_to_emphasize_before_inverse(word, params)
+    if params.terms_to_emphasize_inverse:
         return not emphasize_term
     else:
         return emphasize_term
 
-def word_in_terms_to_emphasize_before_inverse(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams):
-
-    if terms_to_emphasize == []:
-        return False
-                
-    if terms_to_emphasize_list_require_exact_match_ngrams:
-        if word in terms_to_emphasize or word.replace("_", " ") in terms_to_emphasize:
+def word_in_terms_to_emphasize_before_inverse(word, params):
+    if params.terms_to_emphasize_list_require_exact_match_ngrams:
+        return word in params.terms_to_emphasize or word.replace("_", " ") in params.terms_to_emphasize
+    else:
+        if word in params.terms_to_emphasize:
             return True
         else:
-            return False
-    else:
-        if word in terms_to_emphasize:
-            return True
-        elif " " in word:
-            splits = word.split(" ")
-            for sp in splits:
-                if sp in terms_to_emphasize:
-                    return True
-    return False
+            emphasized_subwords = [sp in params.terms_to_emphasize for sp in word.split(" ")]
+            return any(emphasized_subwords)
 
-        
+def lowercase_terms_to_emphasize(terms_to_emphasize):
+    return [term.lower() for term in terms_to_emphasize]
+
 # Very simple compound spitting, not really language independent, but also not very well adapted to any language
 def get_compound_vector(word, word2vec_model):
     return_vector = None
@@ -219,839 +289,799 @@ def get_vector_for_word(word, word2vec_model, ngram_range):
     return None
 
 
-def do_plot(fig, word_vec_dict, sorted_word_scores_vec, title, idf, ngram_range,  x_length_factor, times_found_dict, nr_of_texts, max_score, min_score, new_words, extra, y_length_factor, fontsize, same_y_axis, plot_nr, mark_new_words, bar_height_boost, bar_strength_boost, bar_start_boost, all_projected_xs, extreme_values_tuple=None, add_title=False, terms_to_emphasize=[], log_for_bar_height=False, terms_to_emphasize_list_require_exact_match_ngrams=False, terms_to_emphasize_inverse=False, scale_max_x_used=1.3, freq_dict=None, min_f_in_current_document=1, show_number_of_occurrences=False, plot_mushroom_head=True, actual_plotted_word_size_dict=None, y_extra_space_factor=1.0, y_extra_pow_factor=0, above_below_ratio=ABOVE_BELOW_RATIO, show_words_outside_ylim = False, nr_of_vertical_lines = 0):
-    
-    emphasis_color = (0.45, 0.45, 0.45)
-    emphasis_color_down = (0.7, 0.7, 0.7)
-    
-    print("Do plot for: ", title)
-    if extreme_values_tuple:
-        if DEBUG:
-            extreme_marker_color = "red"
-        else:
-            extreme_marker_color = (0.0, 0.0, 0.0, 0.0)
-            
-        global_point_x_overall_min, global_point_x_overall_max, \
-                global_point_y_overall_min, global_point_y_overall_max, global_point_x_overall_max_with_text = extreme_values_tuple
-        
-    point_x_overall_min = math.inf
-    point_x_overall_max = -math.inf
-    point_x_overall_max_with_text = -math.inf
-    point_y_overall_min = math.inf
-    point_y_overall_max = -math.inf
+def default_color_map(cmap_value):
+    cmap = matplotlib.colormaps['cool']
+    color_base = cmap(cmap_value)
+    midpoint = 0.5
+    color_base_hsv = matplotlib.colors.rgb_to_hsv(color_base[0:3])
+    color_base_hsv[1] = 0.6 + abs(midpoint-cmap_value)/3
+    color_base_hsv[2] = 1.0 - abs(midpoint-cmap_value)/5
+    color_base = list(matplotlib.colors.hsv_to_rgb(color_base_hsv)) + [1.0]
+    return color_base
 
-    cmap = plt.get_cmap('cool')
-    plt.axis('off')
+def get_word_to_display(word, title, new_words, params):
+    fontstyle = "normal"
+    fontweight = "normal"
+    word_to_display = word.word.replace(" ", "_")
+    if params.transform_displayed_word is not None:
+        word_to_display = params.transform_displayed_word(word_to_display)
+    word_to_display_wo_markers = word_to_display
+    if title != ALL_FOLDERS_NAME:
+        if params.mark_new_words and word.word in new_words:
+            # First time it appears
+            word_to_display = word_to_display + "#"
+            fontstyle = "italic" # before used for indicating found in all texts
+    selected_lexicon_term = word_in_terms_to_emphasize(word.word, params)
+    if selected_lexicon_term:
+        fontweight = "bold"
+    if params.show_number_of_occurrences:
+        if isinstance(params.show_number_of_occurrences, float):
+            number_to_show = round(1000*word.relfreq, 1)
+        elif isinstance(params.show_number_of_occurrences, int):
+            number_to_show = int(word.freq)
+        else:
+            print("Unknown type of show_number_of_occurrences")
+            exit()
+        if number_to_show <= params.show_number_of_occurrences:
+            word_to_display = word_to_display + "(" + str(number_to_show) + ")"
+    word_to_display = get_display(word_to_display)
+    word_to_display_wo_markers = get_display(word_to_display_wo_markers)
+    return word_to_display, word_to_display_wo_markers, fontstyle, fontweight, selected_lexicon_term
+
+def get_fontsize_falloff_rate(params, title):
+    # To be able to set fontsize_falloff_rate individually for each plot
+    fontsize_falloff_rate = params.fontsize_falloff_rate
+    
+    if isinstance(fontsize_falloff_rate, dict):
+        fontsize_falloff_rate = {unicodedata.normalize("NFC", key):item for (key, item) in fontsize_falloff_rate.items()}
+
+        if title in fontsize_falloff_rate:
+            fontsize_falloff_rate = fontsize_falloff_rate[title]
+        else:
+            fontsize_falloff_rate = fontsize_falloff_rate.get(DEFAULT_FONTSIZE_FALLOFF_RATE, 1.0)
+    return fontsize_falloff_rate
+
+def fontsize_from_score(params, score, max_score):
+    fontsize_to_use = params.fontsize*score/max_score
+
+    if fontsize_to_use < 1:
+        fontsize_to_use = 1 # if it goes below 1, it is 1 anyway.
+    return fontsize_to_use
+
+def set_limits(axes, min_all_x, max_all_x, max_score, params):
+    ymin_for_ylim_without_margin = -max_score*(1/(params.bar_ratio)-1)
+    ymin_for_ylim = ymin_for_ylim_without_margin*params.margin
+    min_all_x *= X_STRETCH
+    max_all_x *= X_STRETCH
+    graph_width = max_all_x - min_all_x
+    xmin_for_xlim = min_all_x - graph_width*params.left_margin
+    xmax_for_xlim = max_all_x + graph_width*params.right_margin*params.scale_max_x_used
+    axes.set_xlim(xmin=xmin_for_xlim, xmax=xmax_for_xlim)
+    axes.set_ylim(ymin=ymin_for_ylim, ymax=max_score*params.margin)
+    return ymin_for_ylim_without_margin, ymin_for_ylim, min_all_x, max_all_x, xmin_for_xlim, xmax_for_xlim
+
+def calculate_word_frequencies_sum(freq_dict):
+    # Frequencies, but remove n-grams
+    all_word_frequencies = [v for (k,v) in freq_dict.items() if " " not in k]
+    return sum(all_word_frequencies)
+
+def do_plot(fig, sorted_word_scores_vec, title, min_x, max_x, max_score, new_words, params, actual_plotted_word_size_dict=None):
+    emphasis_color = (0.45, 0.45, 0.45)
+    emphasis_color_down = (0, 0, 0, 0.2)
+    
+    print("Do plot for: ", title, "(second run)")
+
+    cmap = default_color_map
+    fig.gca().set_axis_off()
     
     # To avoid auto-scaling, set limits for the axes
-    if log_for_bar_height:
-        max_score = math.pow(1 + max_score, log_for_bar_height)
     
-    margin = 1.1
-    right_margin = 1.3
-    all_x = [x*X_STRETCH for x in all_projected_xs]
-    axes = plt.gca()
-    ymin_for_ylim_without_margin = -max_score*above_below_ratio
-    ymin_for_ylim = ymin_for_ylim_without_margin*margin
-    xmin_for_xlim = min(all_x)*margin
-    xmax_for_xlim = max(all_x)*right_margin*scale_max_x_used
-    axes.set_xlim(xmin=xmin_for_xlim, xmax=xmax_for_xlim)
-    axes.set_ylim(ymin=ymin_for_ylim, ymax=max_score*margin)
+    if params.fontpath is not None:
+        fontproperties = fm.FontProperties(fname=params.fontpath)
+    else:
+        fontproperties = {}
+
+    axes = fig.gca()
+    ymin_for_ylim_without_margin, ymin_for_ylim, min_all_x, max_all_x, xmin_for_xlim, xmax_for_xlim = set_limits(axes, min_x, max_x, max_score, params)
     
-    vertical_line_position = xmin_for_xlim
-    vertical_line_width = (xmax_for_xlim - xmin_for_xlim)/10000
-    vertical_line_style = 'dotted'
-    for vertical_line_nr in range(0, nr_of_vertical_lines):
-        plt.vlines(vertical_line_position, ymin_for_ylim, max_score*margin, colors=None, linestyles=vertical_line_style, zorder = -30000000, linewidth=vertical_line_width, color='lightgrey')
-        plt.text(vertical_line_position, max_score*margin, str(vertical_line_nr), zorder = -30000000, fontsize=5)
-        plt.text(vertical_line_position, ymin_for_ylim, str(vertical_line_nr), zorder = -30000000, fontsize=5)
-        vertical_line_position = vertical_line_position +  (xmax_for_xlim-xmin_for_xlim)/nr_of_vertical_lines
-        if vertical_line_style == 'dotted':
-            vertical_line_style = 'dashdot'
-        else:
-            vertical_line_style = 'dotted'
+    for vertical_line_nr in range(0, params.nr_of_vertical_lines):
+        vertical_line_position = xmin_for_xlim + (xmax_for_xlim - xmin_for_xlim)/1000 +  vertical_line_nr*(xmax_for_xlim-xmin_for_xlim)/params.nr_of_vertical_lines
+        axes.axvline(vertical_line_position, ymin_for_ylim, max_score*params.margin,  linestyle=params.vertical_line_style, zorder = -40000000, linewidth=params.vertical_line_width, color=(0,0,0))
         
     texts = []
     z_order_text = 0
     word_nr = 1
         
     previous_points = []
-    used_colors_list = []
-    actual_plotted_word_size_dict_to_create = {}
-    for score, word in sorted_word_scores_vec:
-    
+
+    for word in sorted_word_scores_vec:
         text_color = (0.0, 0.0, 0.0)
-                    
-        fontsize_to_use = fontsize*score/max_score
-        
-        if log_for_bar_height:
-            fontsize_to_use = fontsize*math.pow(1 + score, log_for_bar_height)/max_score
-                        
-        if fontsize_to_use < 1:
-            fontsize_to_use = 1 # if it goes below 1, it is 1 anyway.
-            if DEBUG:
-                text_color = 'red'
-        
-        y_extra_space_factor_to_use = y_extra_space_factor * round(math.pow(fontsize_to_use, y_extra_pow_factor), 3)
+        fontsize_to_use = word.fontsize
+
+        word_to_display, word_to_display_wo_markers, fontstyle, fontweight, selected_lexicon_term = word.show
+
+        y_extra_space_factor_to_use = params.y_extra_space_factor
         if y_extra_space_factor_to_use < 1:
             y_extra_space_factor_to_use = 1
             
         # If the word is underlined, a little extra space is needed
-        if word_in_terms_to_emphasize(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-            y_extra_space_factor_to_use = y_extra_space_factor_to_use*1.1
-            
-        if word not in word_vec_dict:
-            print("unknown word: ", word)
-            exit(1)
-        if word in word_vec_dict:
-            word_to_display = word.replace(" ", "_")
-            
+        if selected_lexicon_term:
+            y_extra_space_factor_to_use = y_extra_space_factor_to_use*1.2
 
-            
-            fontstyle = "normal"
-            fontweight = "normal"
-            nr_of_texts_except_all = nr_of_texts - 1
-            if title != ALL_FOLDERS_NAME:
-                """
-                if word in times_found_dict and times_found_dict[word] != nr_of_texts_except_all or nr_of_texts_except_all <= 1:
-                    fontstyle = "normal"
-                else:
-                    fontstyle = "italic"
-                """
-                
-                if mark_new_words:
-                    if word in new_words:
-                        # First time it appears
-                        # fontweight = "bold"
-                        word_to_display = word_to_display + "#"
-                        fontstyle = "italic" # before used for indicating found in all texts
-                    
-                    """
-                    if word in times_found_dict and times_found_dict[word] == nr_of_texts_except_all:
-                        fontstyle = "italic" #found in all texts
-                        fontweight = "light"
-                    
-                else:
-                    if word in times_found_dict and times_found_dict[word] == 1 and nr_of_texts_except_all > 1: # only occurs in this text
-                        #print("found once, bold", word)
-                        fontweight = "bold"
-                        #fontweight = "light"
-                """
-            if word_in_terms_to_emphasize(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-                fontweight = "bold"
-                word_to_display = word_to_display + "§"
-                
-            if show_number_of_occurrences and freq_dict and word in freq_dict:
-                if not(isinstance(show_number_of_occurrences, int)):
-                    show_number_of_occurrences = 10 # Backward compatibility, used to be a boolean only
-                if freq_dict[word] <= show_number_of_occurrences:
-                    word_to_display = word_to_display + "(" + str(int(freq_dict[word])) + ")"
-            word_to_display = get_display(word_to_display)
-            len_of_word = len(word_to_display)
-            
-            point = Point(word_vec_dict[word][0], word_vec_dict[word][1])
-            
-            point = point.scalex(X_STRETCH)
-            
-            point_before = point
-            changed = True
-            
-            # Just use a dummy-point the first round
-            max_point_x = point.x
-  
-            # The second round, use the actual size
-            if actual_plotted_word_size_dict is not None :
-                assert(word in actual_plotted_word_size_dict)
-                bbox_x = actual_plotted_word_size_dict[word][0]
-                max_point_x = point.x + bbox_x
-            
-            while changed:
-                point_y_before_loop = point.y
-                for prev_word, prev_point in previous_points:
-                        
-                    # Just use a dummy-point the first round
-                    left_upper_max_point_y = point.y
-                    
-                    # The second round, use the actual size
-                    if actual_plotted_word_size_dict is not None :
-                        assert(word in actual_plotted_word_size_dict)
-                        bbox_y = actual_plotted_word_size_dict[word][1]
-                        left_upper_max_point_y = point.y + bbox_y*y_extra_space_factor_to_use
-                
-                    my_bounding_box = Rect(point, Point(max_point_x, left_upper_max_point_y))
-                    if my_bounding_box.intersects(prev_point):
-                        point = Point(point.x, prev_point.max.y)
-                if point_y_before_loop == point.y:
-                    changed = False
-   
-    
-            y_bar_start = (max_score - ymin_for_ylim)*0.01*bar_start_boost
-           
-            
-            cmap_value = ((point.x/X_STRETCH)/100 + 1)/2 # Not used when actually plotting
-            if extreme_values_tuple:
-                cmap_value = (point.x - global_point_x_overall_min)/(global_point_x_overall_max - global_point_x_overall_min)
-            color_lighter_value = min(0.15*fontsize_to_use, 1)
-            color_lighter = (cmap(cmap_value)[0], cmap(cmap_value)[1], cmap(cmap_value)[2], color_lighter_value)
-            color_lighter_lighter_value = min(0.1*fontsize_to_use, 1)
-            color_lighter_lighter = (cmap(cmap_value)[0], cmap(cmap_value)[1], cmap(cmap_value)[2], color_lighter_lighter_value)
-            
-            marker=MarkerStyle('v', joinstyle=JoinStyle.miter)
-            
-            # The bar upwards
-            y_bar_length = score
-            if log_for_bar_height:
-                y_bar_length = math.pow(1 + score, log_for_bar_height)
-            linewidth = bar_strength_boost*score/max_score
-            if log_for_bar_height:
-                linewidth = bar_strength_boost*math.pow(1 + score, log_for_bar_height)/max_score
-            
-            upwardbar_end = y_bar_start + y_bar_length
-            color_of_upward_bar = cmap(cmap_value)
-            used_colors_list.append(color_of_upward_bar)
-            
-            
-            
-            # Make lines for terms to emphasize in black
-            selected_lexicon_term = False
-            if word_in_terms_to_emphasize(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-                selected_lexicon_term = True
+        len_of_word = len(word_to_display)
 
-                used_colors_list[-1] = emphasis_color
-                plt.plot([point.x, point.x], [y_bar_start, upwardbar_end], color=emphasis_color, zorder = -z_order_text, linewidth=linewidth)
-                if plot_mushroom_head:
-                    plt.scatter(point.x, upwardbar_end, zorder = -z_order_text, color=emphasis_color, marker = marker, s=linewidth) #
-                    
-                    
-                    
-            # Don't mark with grey if there are terms_to_emphasize
-            elif mark_new_words and terms_to_emphasize == [] and word in new_words:
-                used_colors_list[-1] = emphasis_color
-                plt.plot([point.x, point.x], [y_bar_start, upwardbar_end], color=emphasis_color, zorder = -z_order_text, linewidth=linewidth)
-                if plot_mushroom_head:
-                    plt.scatter(point.x, upwardbar_end, zorder = -z_order_text, color=emphasis_color, marker = "*", s=linewidth)
-            else:
-                plt.plot([point.x, point.x], [y_bar_start, upwardbar_end], color=color_of_upward_bar, zorder = -2000-z_order_text, linewidth=linewidth)
-                if plot_mushroom_head:
-                    plt.scatter(point.x, upwardbar_end, zorder = -200000, color=color_of_upward_bar, marker = "o", s=linewidth) #s=
-                
-                
-            
-            # The texts have been changed to be printed downwards instead
-            negative_text_y = -point.y
-                        
-            
-            if show_words_outside_ylim or negative_text_y >= ymin_for_ylim_without_margin:
-                # Mark lexicon terms
-                if selected_lexicon_term:
-                    t = plt.text(point.x, negative_text_y, word_to_display, zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=fontstyle, fontweight="bold", verticalalignment="top")
-                                    
-                    #t_underline = plt.text(point.x, negative_text_y, len(word)*"_", zorder = -20000, color = (0.0, 0.0, 0.0), fontsize=fontsize_to_use, fontstyle="italic", fontweight="light", verticalalignment="top")
-                else:
-                    t = plt.text(point.x, negative_text_y, word_to_display, zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=fontstyle, fontweight=fontweight, verticalalignment="top")
-            else:
-                plt.scatter(point.x, ymin_for_ylim_without_margin, zorder = -200000, color=color_lighter_lighter, marker = ".", s=fontsize_to_use*0.01)
-                negative_text_y = ymin_for_ylim_without_margin # to make the bar downward stop
-                if plot_nr != 0 and word in new_words and mark_new_words:
-                    # Add new words at the border, but don't make them bold (just for estetical reasons)
-                    t = plt.text(point.x, ymin_for_ylim_without_margin*1.01, word_to_display, zorder = z_order_text, color = emphasis_color, fontsize=1, fontstyle=fontstyle, fontweight="normal", verticalalignment="top", rotation=270)
-                else:
-                # For all other words, add a dummy-text and a marker
-                    t = plt.text(point.x, ymin_for_ylim_without_margin, "", zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=fontstyle, fontweight=fontweight, verticalalignment="top")
-                    
-            
-            bbox = t.get_window_extent(renderer = fig._get_renderer())
-            transf = plt.gca().transData.inverted()
-            bb_datacoords = bbox.transformed(transf)
-            x_length_from_bbox = bb_datacoords.x1 - bb_datacoords.x0
-            y_length_from_bbox = bb_datacoords.y1 - bb_datacoords.y0
-            
-      
-            max_point_x = point.x + x_length_from_bbox
-            max_point_y = point.y + y_length_from_bbox*y_extra_space_factor_to_use
-               
-                
-            max_point = Point(max_point_x, max_point_y)
-            previous_points.append((word_to_display, Rect(point, max_point)))
-            
-            actual_plotted_word_size_dict_to_create[word] = (x_length_from_bbox, y_length_from_bbox)
-            
-            
-            # The bar downwards
-            linewidth_down=bar_strength_boost*score/max_score
-            if log_for_bar_height:
-                linewidth_down=bar_strength_boost*math.pow(1 + score, log_for_bar_height)/max_score
-            
-            if word_in_terms_to_emphasize(word, terms_to_emphasize, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-                plt.plot([point.x, point.x], [y_bar_start, negative_text_y], color=emphasis_color_down, linewidth=linewidth_down, zorder = -10000000)
-                plt.scatter(point.x, negative_text_y, zorder = -100000, color=emphasis_color_down, marker = marker, s=fontsize_to_use*0.01) #
-            elif mark_new_words and terms_to_emphasize == [] and word in new_words:
-                used_colors_list[-1] = emphasis_color_down
-                plt.plot([point.x, point.x], [y_bar_start, negative_text_y], color=emphasis_color_down, linewidth=linewidth_down, zorder = -30000000)
-                plt.scatter(point.x, negative_text_y, zorder = -300000, color=emphasis_color_down, marker = marker, s=fontsize_to_use*0.01) #
-            else:
-                plt.plot([point.x, point.x], [y_bar_start, negative_text_y], color=color_lighter, linewidth=linewidth_down, zorder = -20000000)
-                plt.scatter(point.x, negative_text_y, zorder = -200000, color=color_lighter_lighter, marker = "o", s=fontsize_to_use*0.01) #
+        point = Point(word.x, 0)
 
-            
-            z_order_text =  z_order_text - 1
-   
-            min_y_used = point.y
-            max_y_used = upwardbar_end + fontsize_to_use
-            if min_y_used < point_y_overall_min:
-                point_y_overall_min = min_y_used
-            if max_y_used > point_y_overall_max:
-                point_y_overall_max = max_y_used
-                
-            max_x_used_with_text = max_point_x*scale_max_x_used
-            
-            if point.x < point_x_overall_min:
-                point_x_overall_min = point.x
-            if point.x > point_x_overall_max:
-                point_x_overall_max = point.x
-            if max_x_used_with_text > point_x_overall_max_with_text:
-                point_x_overall_max_with_text = max_x_used_with_text
-            
+        point = point.scalex(X_STRETCH)
+
+        changed = True
+
+        assert(word.word in actual_plotted_word_size_dict)
+        bbox_x = actual_plotted_word_size_dict[word.word][0]
+        margin_x = bbox_x * (params.x_extra_space_factor-1)
+        max_point = point.textforward(bbox_x, params)
+
+        assert(word.word in actual_plotted_word_size_dict)
+        ystep = actual_plotted_word_size_dict[word.word][1] * y_extra_space_factor_to_use
+        while changed:
+            point_y_before_loop = point.y
+            for prev_word, prev_point in previous_points:
+
+                left_upper_max_point_y = point.y + ystep
+
+                my_bounding_box = Rect(point, Point(max_point.x, left_upper_max_point_y)).padded(0,margin_x,0,margin_x)
+                if my_bounding_box.intersects(prev_point):
+                    point = Point(point.x, prev_point.max.y)
+            if point_y_before_loop == point.y:
+                changed = False
+
+
+        y_bar_start = (max_score - ymin_for_ylim)*0.01*params.bar_start_boost
+
+
+        cmap_value = (point.x - min_all_x)/(max_all_x - min_all_x)
+
+        if params.color_map is not None:
+            color_base = params.color_map(cmap_value)
         else:
-            print("Word not found, strange", word)
+            color_base = cmap(cmap_value)
+        color_lighter_value = 0.2 #min(0.15*fontsize_to_use, 1)
+        color_lighter = (color_base[0], color_base[1], color_base[2], color_lighter_value)
+        color_lighter_lighter_value = 0.1 #min(0.1*fontsize_to_use, 1)
+        color_lighter_lighter = (color_base[0], color_base[1], color_base[2], color_lighter_lighter_value)
+
+        marker=MarkerStyle('v', joinstyle=JoinStyle.miter)
+
+        # The bar upwards
+        y_bar_length = word.score
+        linewidth = params.bar_strength_boost*word.score/max_score
+
+        upwardbar_end = y_bar_start + y_bar_length
+        color_of_upward_bar = color_base
+
+
+
+        # Make lines for terms to emphasize in black
+        if selected_lexicon_term:
+            color_of_upward_bar = emphasis_color
+            upward_bar_zorder = -z_order_text
+            mushroom_head_zorder = -z_order_text
+            mushroom_head_color = emphasis_color
+            mushroom_head_marker = marker
+        # Don't mark with grey if there are terms_to_emphasize
+        elif params.mark_new_words and not params.terms_to_emphasize and word.word in new_words:
+            color_of_upward_bar = emphasis_color
+            upward_bar_zorder = -z_order_text
+            mushroom_head_zorder = -z_order_text
+            mushroom_head_color = emphasis_color
+            mushroom_head_marker = "*"
+        else:
+            upward_bar_zorder = -2000-z_order_text
+            mushroom_head_zorder = -200000
+            mushroom_head_color = color_of_upward_bar
+            mushroom_head_marker = "o"
+        if params.draw_vertical_bars:
+            axes.plot([point.x, point.x], [y_bar_start, upwardbar_end], color=color_of_upward_bar, zorder = upward_bar_zorder, linewidth=linewidth)
+            if params.plot_mushroom_head:
+                axes.scatter(point.x, upwardbar_end, zorder = mushroom_head_zorder, color=mushroom_head_color, marker = mushroom_head_marker, s=linewidth)
+
+
+
+        # The texts have been changed to be printed downwards instead
+        negative_text_y = -point.y
+
+        horizontalalignment = get_horizontalalignment(params)
+        t = None
+        if params.show_words_outside_ylim or negative_text_y >= ymin_for_ylim_without_margin:
+            if params.background_box:
+                background_color = color_lighter_lighter
+            else:
+                background_color = None
+            t = axes.text(point.x, negative_text_y, word_to_display, zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=fontstyle, fontweight=fontweight, verticalalignment="top", fontproperties=fontproperties, horizontalalignment=horizontalalignment, background=background_color)
+            if selected_lexicon_term:
+                underline_str = len(word.word)*"_"
+
+                if params.transform_displayed_word:
+                    underline_str = len(params.transform_displayed_word(word.word))*"_"
+                try:
+                    axes.underline(point.x, negative_text_y, word_to_display_wo_markers, zorder = z_order_text, color = text_color, fontsize=fontsize_to_use, fontstyle=fontstyle, fontweight=fontweight, verticalalignment="top", fontproperties=fontproperties, horizontalalignment=horizontalalignment)
+                except AttributeError:
+                    t_underline = axes.text(point.x, negative_text_y, underline_str, zorder = -20000, color = (0.0, 0.0, 0.0), fontsize=fontsize_to_use, verticalalignment="top", horizontalalignment=horizontalalignment)
+        else:
+            if word.word in new_words and params.mark_new_words:
+                # Add new words at the border, but don't make them bold (just for estetical reasons)
+                axes.text(point.x, ymin_for_ylim_without_margin*1.01, word_to_display, zorder = z_order_text, color = emphasis_color, fontsize=1, fontstyle=fontstyle, fontweight="normal", verticalalignment="top", rotation=270, fontproperties=fontproperties, horizontalalignment=horizontalalignment)
+            if params.draw_vertical_bars:
+                axes.scatter(point.x, ymin_for_ylim_without_margin, zorder = -200000, color=color_lighter_lighter, marker = ".", s=fontsize_to_use*0.01)
+            negative_text_y = ymin_for_ylim_without_margin # to make the bar downward stop
+
+        if t is not None:
+            x_length_from_bbox, y_length_from_bbox = calculate_text_size(t, fig, axes)
+
+            max_point = (point
+                .textforward(x_length_from_bbox, params)
+                .addy(y_length_from_bbox*y_extra_space_factor_to_use)
+            )
+            margin_x = x_length_from_bbox * (params.x_extra_space_factor-1)
+            previous_points.append((word_to_display, Rect(point, max_point).padded(0,margin_x,0,margin_x)))
+
+
+
+        # The bar downwards
+        if params.fixed_linewidth_down is None: # Then make it in relation to the bar strength
+            linewidth_down=params.bar_strength_boost*word.score/max_score
+        else:
+            linewidth_down = params.fixed_linewidth_down
+
+        linestyle_down = "solid"
+        if not params.draw_vertical_bars:
+            pass
+        elif selected_lexicon_term:
+            axes.plot([point.x, point.x], [y_bar_start, negative_text_y], color=emphasis_color_down, linewidth=linewidth_down, zorder = -10000000, linestyle=linestyle_down)
+            axes.scatter(point.x, negative_text_y, zorder = -100000, color=emphasis_color_down, marker = marker, s=fontsize_to_use*0.01) #
+        elif params.mark_new_words and not params.terms_to_emphasize and word.word in new_words:
+            axes.plot([point.x, point.x], [y_bar_start, negative_text_y], color=emphasis_color_down, linewidth=linewidth_down, zorder = -30000000, linestyle=linestyle_down)
+            axes.scatter(point.x, negative_text_y, zorder = -300000, color=emphasis_color_down, marker = marker, s=fontsize_to_use*0.01) #
+        else:
+            axes.plot([point.x, point.x], [y_bar_start, negative_text_y], color=color_lighter, linewidth=linewidth_down, zorder = -20000000, linestyle=linestyle_down)
+            axes.scatter(point.x, negative_text_y, zorder = -200000, color=color_lighter_lighter, marker = "o", s=fontsize_to_use*0.01) #
+
+
+        z_order_text =  z_order_text - 1
         word_nr = word_nr + 1
         
         if title == ALL_FOLDERS_NAME and word_nr > 3000:
             break  # To avoid that this one getting really large, when nr of top words is None
 
-    x_width =  point_x_overall_max - point_x_overall_min
+    if params.plot_vertical_line_label:
+        if params.compact:
+            line_label_y = -max(bbox.max.y for _, bbox in previous_points)+ymin_for_ylim/100
+        else:
+            line_label_y = ymin_for_ylim
+        for vertical_line_nr in range(0, params.nr_of_vertical_lines):
+            vertical_line_position = xmin_for_xlim + (xmax_for_xlim - xmin_for_xlim)/1000 +  vertical_line_nr*(xmax_for_xlim-xmin_for_xlim)/params.nr_of_vertical_lines
+            axes.text(vertical_line_position + (xmax_for_xlim - xmin_for_xlim)/1000, line_label_y, convert_to_roman_plus_one(vertical_line_nr), zorder = -30000000, fontsize=2, fontproperties=fontproperties)
+
     title_to_use = "\n" + title
     title_to_use = latex_clean(title_to_use)
     title_fontsize = 10/math.log(len(title_to_use) + 3)*1.6
-    if add_title:
-        plt.title(title_to_use, fontsize=title_fontsize)
+    if params.add_title:
+        axes.set_title(title_to_use, fontsize=title_fontsize)
     
-    return (point_x_overall_min, point_x_overall_max, point_y_overall_min, point_y_overall_max, point_x_overall_max_with_text, used_colors_list, actual_plotted_word_size_dict_to_create)
+def get_horizontalalignment(params):
+    if params.rtl_text:
+        return "right"
+    else:
+        return "left"
+
+def calculate_text_size(t, fig, axes):
+    bbox = t.get_window_extent(renderer = fig._get_renderer())
+    transf = axes.transData.inverted()
+    bb_datacoords = bbox.transformed(transf)
+    x_length_from_bbox = bb_datacoords.x1 - bb_datacoords.x0
+    y_length_from_bbox = bb_datacoords.y1 - bb_datacoords.y0
+    return x_length_from_bbox, y_length_from_bbox
 
 
-def vectorize_and_generate_plotdata(background_corpus, texts, names, stopwords, word2vec_model, ngram_range, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, y_length_factor, fontsize, same_y_axis, mark_new_words, bar_height_boost, bar_strength_boost, bar_start_boost, min_df, max_df, add_title, terms_to_emphasize_list, log_for_bar_height, min_df_in_document, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse, scale_max_x_used, min_f_in_current_document, show_number_of_occurrences, plot_mushroom_head, min_tf_in_corpora, lowercase, include_all_terms_to_emphasize, y_extra_space_factor, y_extra_pow_factor, above_below_ratio, use_global_max_score, show_words_outside_ylim, nr_of_vertical_lines, save_vectors, use_additional_saved_vectors, restrict_vocabulary_to_this_list):
-    
-    
-    if terms_to_emphasize_list:
-        if lowercase:
-            lowered_terms_to_emphasize_list = []
-            for sublist in terms_to_emphasize_list:
-                lowered_terms_to_emphasize_list.append([term.lower() for term in sublist])
-            terms_to_emphasize_list = lowered_terms_to_emphasize_list
-            
-    
+def do_plot_prepare(fig, sorted_word_scores_vec, title, max_score, new_words, min_x, max_x, params):
+    if params.fontpath is not None:
+        fontproperties = fm.FontProperties(fname=params.fontpath)
+    else:
+        fontproperties = {}
+
+    axes = fig.gca()
+    set_limits(axes, min_x, max_x, max_score, params)
+
+    word_nr = 1
+
+    actual_plotted_word_size_dict_to_create = {}
+
+    actual_text_boundary_xs = []
+
+    for word in sorted_word_scores_vec:
+        start_point = Point(word.x, 0).scalex(X_STRETCH)
+
+        text_color = (0.0, 0.0, 0.0)
+        word_to_display, _, fontstyle, fontweight, _ = word.show
+        t = axes.text(0, 0, word_to_display, zorder = 0, color = text_color, fontsize=word.fontsize, fontstyle=fontstyle, fontweight=fontweight, verticalalignment="top", fontproperties=fontproperties, horizontalalignment=get_horizontalalignment(params))
+        if t is not None:
+            x_length_from_bbox, y_length_from_bbox = calculate_text_size(t, fig, axes)
+
+            actual_plotted_word_size_dict_to_create[word.word] = (x_length_from_bbox, y_length_from_bbox)
+            end_point = start_point.textforward(x_length_from_bbox, params)
+            actual_text_boundary_xs.append(start_point.x)
+            actual_text_boundary_xs.append(end_point.x)
+
+        word_nr = word_nr + 1
+
+        if title == ALL_FOLDERS_NAME and word_nr > 3000:
+            break  # To avoid that this one getting really large, when nr of top words is None
+
+    return actual_plotted_word_size_dict_to_create, min(actual_text_boundary_xs), max(actual_text_boundary_xs)
+
+def get_word_x_from_hash(word, min_x, max_x):
+    sha1hash = hashlib.sha1(word.encode('utf-8')).digest()
+    (uint64_hash,) = struct.unpack("!Q", sha1hash[:8])
+    normalized_hash = math.ldexp(uint64_hash, -64)
+    x_length = max_x - min_x
+    x_point = normalized_hash * x_length + min_x
+    print(sha1hash, uint64_hash, normalized_hash, x_point)
+    return x_point
+
+def write_scores(output_folder, sorted_word_scores_matrix, names, new_words_lists, extra_saves):
     # Create folder for storing tf-idf or tf statistics
-    extra = get_extra_indicator(idf, ngram_range, output_folder)
-    texts_folder = "texts" + get_extra_indicator(idf, ngram_range, output_folder)
+    texts_folder = "texts-" + clean_folder_name(output_folder)
     texts_output = os.path.join(output_folder, texts_folder)
     if not os.path.exists(texts_output):
         os.mkdir(texts_output)
-    
-    nr_of_texts = len(texts)
-    
-    # For tf-idf
-    ############
-        
-    freq_dict_list = [] # A list of word freqencies-dictionaries for each document
-    freqs_for_entire_corpora = {}
-    min_freq_in_a_doc_for_each_word = {}
-    
-    for text in texts:
-        # A local vectorizer for just each text, to count frequencies in each text and save in freq_dict_list
-        freq_vectorizer = TfidfVectorizer(sublinear_tf=False, ngram_range = ngram_range, use_idf=False, norm=None, stop_words=stopwords, lowercase=lowercase)
-        freq_X = freq_vectorizer.fit_transform([text])
-        freqency_inversed = freq_vectorizer.inverse_transform(freq_X)
-        freq_list = []
-        freq_dict = {}
-        for words, freqs in zip(freqency_inversed, freq_X):
-            score_vec = freqs.toarray()[0]
-            for word in words:
-                freq_for_word = score_vec[freq_vectorizer.vocabulary_[word]]
-                freq_dict[word] = freq_for_word
-                
-                # Count the total frequency for a word, in all texts
-                if word not in freqs_for_entire_corpora:
-                    freqs_for_entire_corpora[word] = freq_for_word
-                else:
-                    freqs_for_entire_corpora[word] =  freqs_for_entire_corpora[word] + freq_for_word
-                    
-                # Collect minimum occurrences in the corpus for a word in a document
-                if word not in min_freq_in_a_doc_for_each_word:
-                    min_freq_in_a_doc_for_each_word[word] = freq_for_word
-                else:
-                    if freq_for_word < min_freq_in_a_doc_for_each_word[word]:
-                        min_freq_in_a_doc_for_each_word[word] = freq_for_word
-                
-        freq_dict_list.append(freq_dict)
-
-    # Create a vocabulary where all words with a frequencey < min_tf_in_corpora are excluded
-    vocabulary_for_min_tf_in_corpora = set([word for (word, freq) in freqs_for_entire_corpora.items() if freq >= min_tf_in_corpora])
-    
-
-    if min_tf_in_corpora < 1: # As a proptions of the total in corpus, the interpret as a percentil
-                    
-        all_terms_corpora = sorted(freqs_for_entire_corpora.values(), reverse=True)
-        perencile_freq_index = int(len(all_terms_corpora)*min_tf_in_corpora)
-        freq_to_be_larger_than = all_terms_corpora[perencile_freq_index]
-        vocabulary_for_min_tf_in_corpora = set([word for (word, freq) in freqs_for_entire_corpora.items() if freq >= freq_to_be_larger_than])
-        print("freq_to_be_larger_than", freq_to_be_larger_than)
-        
-        
-    if min_df_in_document != None:
-        print("WARNING: min_df_in_document is used, not necessarily practical")
-        vocabulary_min_df_in_document = set([word for (word, freq) in min_freq_in_a_doc_for_each_word.items() if freq >= min_df_in_document])
-        vocabulary_to_use = list(vocabulary_for_min_tf_in_corpora.intersection(vocabulary_min_df_in_document))
-    else:
-        vocabulary_to_use = list(vocabulary_for_min_tf_in_corpora)
-    
-    if max_df != 1.0 or min_df > 1:
-        max_df_vectorizer = TfidfVectorizer(stop_words=stopwords, min_df=min_df, max_df=max_df, smooth_idf=False, sublinear_tf=False, ngram_range = ngram_range, use_idf=idf, norm=None, lowercase=lowercase)
-        print("before, max_df, min_df",  len(vocabulary_to_use))
-        print("nr of texts", len(texts))
-        max_df_X = max_df_vectorizer.fit_transform(texts)
-        max_df_set = set(max_df_vectorizer.vocabulary_)
-        vocabulary_to_use = max_df_set.intersection(set(vocabulary_to_use))
-        print("after, max_df, min_df", len(vocabulary_to_use))
-        
-    print("before",  len(vocabulary_to_use))
-    if include_all_terms_to_emphasize:
-        flattened_terms_to_emphasize_list = []
-        for sublist in terms_to_emphasize_list:
-            flattened_terms_to_emphasize_list.extend(sublist)
-        vocabulary_to_use = list(set(vocabulary_to_use).union(set(flattened_terms_to_emphasize_list)))
-    print("after", len(vocabulary_to_use))
-    
-    if restrict_vocabulary_to_this_list:
-        vocabulary_to_use = list(set(vocabulary_to_use).intersection(set(restrict_vocabulary_to_this_list)))
-    
-    # The main vectorizer, with the statistics to use for plotting
-    main_vectorizer = TfidfVectorizer(stop_words=stopwords, min_df=min_df, max_df=max_df, smooth_idf=False, sublinear_tf=False, ngram_range = ngram_range, use_idf=idf, norm=None, vocabulary = vocabulary_to_use, lowercase=lowercase)
-
-    print("len(texts), all texts inclusive", len(texts))
-    print("len(texts + background_corpus)", len(texts + background_corpus))
-
-    main_vectorizer.fit_transform(texts + background_corpus)
-    X = main_vectorizer.transform(texts)
-    inversed = main_vectorizer.inverse_transform(X)
-    
-    sorted_word_scores_matrix_before_cutoff = []
-    all_words = []
-    for el, w, name in zip(inversed, X, names):
-        score_vec = w.toarray()[0]
-        word_scord_vec = []
-        for word in el:
-            all_words.append(word)
-            word_scord_vec.append((score_vec[main_vectorizer.vocabulary_[word]], word))
-        word_scord_vec = sorted(word_scord_vec, reverse=True)
-        sorted_word_scores_matrix_before_cutoff.append(word_scord_vec)
-         
-    
-    # Create space (and score statistics):
-    
-    times_found_dict = {}
-    max_scores = []
-    min_scores = []
-        
-    # Only plot top nr_of_words_to_show words
-    # And also, filter out too infrequent words
-    new_words_lists_before_cutoff = []
-    previous_words_set_before_cutoff = set()
-    
-    if nr_of_words_to_show is None:
-        nr_of_words_to_show = math.inf
-        print("nr_of_words_to_show is None, therefore it will be set to math.inf ")
-                
-    sorted_word_scores_matrix = []
-    for sws, freq_dict in zip(sorted_word_scores_matrix_before_cutoff, freq_dict_list):
-    
-        total_nr_of_words = sum(freq_dict.values())
-    
-        filtered_sws_for_current_doc_freq = []
-        
-        new_words_list_before_cutoff = []
-                
-        for sw in sws:
-            w = sw[1]
-            
-            if include_all_terms_to_emphasize and word_in_terms_to_emphasize(word, terms_to_emphasize_list, mark_new_words, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse):
-                filtered_sws_for_current_doc_freq.append(sw)
-            if len(filtered_sws_for_current_doc_freq) < nr_of_words_to_show:
-                if min_f_in_current_document >= 1:
-                    # cut-off, not more than nr_of_words_to_show
-                    if freq_dict[w] < min_f_in_current_document:
-                        pass # Too infrequent in document to include in plot
-                    else:
-                        filtered_sws_for_current_doc_freq.append(sw)
-                else:
-                    word_proportion = freq_dict[w]/total_nr_of_words
-                    
-                    if word_proportion < min_f_in_current_document:
-                        pass # Too infrequent in document to include in plot
-                    else:
-                        filtered_sws_for_current_doc_freq.append(sw)
-            # For checking if a word is one not in previous (before cut-off) corpora
-            if w not in previous_words_set_before_cutoff:
-                new_words_list_before_cutoff.append(w)
-            previous_words_set_before_cutoff.add(w)
-            
-        sorted_word_scores_matrix.append(filtered_sws_for_current_doc_freq)
-        new_words_lists_before_cutoff.append(new_words_list_before_cutoff)
-    
-    
-    word_to_use_set = set()
-    new_words_lists = []
-    previous_words_set = set()
-    max_all_plot = -math.inf
-    for sws, title, freq_dict in zip(sorted_word_scores_matrix, names, freq_dict_list):
-    
-        max_score_subcorpus = -math.inf
-        min_score_subcorpus = math.inf
-        new_words_list = []
-        
-        for s, w in sws:
-            word_to_use_set.add(w)
-            if title != ALL_FOLDERS_NAME:  # Don't count the 'all image' as a document occurrences
-                if w not in times_found_dict:
-                    times_found_dict[w] = 1
-                else:
-                    times_found_dict[w] = times_found_dict[w] + 1
-            
-                # "All" has very different scores
-                if s > max_score_subcorpus:
-                    max_score_subcorpus = s
-                if s < min_score_subcorpus:
-                    min_score_subcorpus = s
-            
-            else:
-                if s > max_all_plot:
-                    max_all_plot = s
-            # For checking if a word is one not in previous (cut-off-filtered) corpora
-            if w not in previous_words_set:
-                new_words_list.append(w)
-            previous_words_set.add(w)
-         
-
-    
-        new_words_lists.append(new_words_list)
-        max_scores.append(max_score_subcorpus)
-        min_scores.append(min_score_subcorpus)
-
-    all_vectors_list = []
-    found_words = []
-    not_found_words = []
-
-    
-    # It is possible to add extra words, not found in the corpus, but that are to
-    # be part of the visualisaion
-    words_to_generate_space_for = word_to_use_set
-    for word in extra_words:
-        words_to_generate_space_for.add(word)
-    words_to_generate_space_for = sorted(list(words_to_generate_space_for))
-    print("Nr of words to generate space for:", len(words_to_generate_space_for))
-    
-    for word in words_to_generate_space_for:
-        # Add vectors
-        norm_vector = get_vector_for_word(word, word2vec_model, ngram_range)
-        if norm_vector == None:
-            not_found_words.append(word)
-        else:
-            found_words.append(word)
-            all_vectors_list.append(norm_vector)
-                    
-    # Just add a random point for words not found in the space
-    for word in not_found_words:
-        print("Use random point for ", word)
-        #seed = hash(word.encode('utf-8'))
-        #print(seed)
-        random_el = (random.sample(all_vectors_list, 1))[0]
-        point = [el + 0.01*random.randint(1,10) for el in random_el]
-        norm_vector = list(preprocessing.normalize(np.reshape(point, newshape = (1, len(point))), norm='l2')[0])
-        found_words.append(word)
-        all_vectors_list.append(norm_vector)
-        
-    all_vectors_np = np.array(all_vectors_list)
-    print("len(all_vectors_list)", len(all_vectors_list))
-    
-    
-    if save_vectors:
-        save_vectors_in = os.path.join(output_folder, "saved_vectors.npy")
-        print("save_vectors_in", save_vectors_in)
-        np.save(save_vectors_in, all_vectors_np)
-    if use_additional_saved_vectors:
-        more_vectors_np = np.load(use_additional_saved_vectors)
-        for a in more_vectors_np:
-            all_vectors_list.append(a)
-        all_vectors_np = np.array(all_vectors_list)
-        print("len(all_vectors_list)", len(all_vectors_list))
-        
-
-    pca_model = PCA(n_components=50, random_state=0)
-    tsne_model = TSNE(n_components=1, random_state=0)
-    DX_pca = pca_model.fit_transform(all_vectors_np)
-    DX = tsne_model.fit_transform(DX_pca)
-
-    all_projected_xs = [float(xi[0]) for xi in DX]
-    
-    word_vec_dict = {}
-    min_x = 100
-    min_y = 100
-    max_x = -100
-    max_x = -100
-    max_y = -100
-    for point, found_word in zip(DX, found_words):
-        point = [float(point[0]), 0]
-        word_vec_dict[found_word] = point
-        if point[0] < min_x:
-            min_x = point[0]
-        if point[0] > max_x:
-            max_x = point[0]
-        if point[1] < min_y:
-            min_y = point[1]
-        if point[1] > max_y:
-            max_y = point[1]
-
 
     # Write scores to file
-    for sws, title, freq_dict in zip(sorted_word_scores_matrix, names, freq_dict_list):
-        tf_name = os.path.join(texts_output, title + extra + ".txt")
+    for sws, title in zip(sorted_word_scores_matrix, names):
+
+        tf_name = os.path.join(texts_output, title + "-" + clean_folder_name(output_folder) + ".txt")
         with open(tf_name, "w") as tf_write:
-            for s, w in sws:
-                w_freq = freq_dict[w]
-                w_vec = word_vec_dict[w]
-                tf_write.write("\t".join([w, str(s), "(" + str(w_freq) + ")", str(w_vec)]) + "\n")
+            for sw in sws:
+                w_freq_proportional = round(1000*sw.relfreq, 1)
+
+                tf_write.write("\t".join([sw.word, str(sw.score), "(%.1f)" % sw.freq, "(%.1f)" % w_freq_proportional, str([sw.x,0])]) + "\n")
 
     for new_words_list, title in zip(new_words_lists, names):
         if title != ALL_FOLDERS_NAME:
             new_words_output = texts_output + "-new-words"
             if not os.path.exists(new_words_output):
                 os.mkdir(new_words_output)
-            new_words_file_name = os.path.join(new_words_output, "new_words_" + title + extra + ".txt")
+            new_words_file_name = os.path.join(new_words_output, "new_words_" + title + "-" + clean_folder_name(output_folder) + ".txt")
             with open(new_words_file_name, "w") as nwfn:
-                for new_word_el in new_words_list:
+                for new_word_el in sorted(new_words_list):
                     nwfn.write(new_word_el + "\n")
-        
-        
-    global_point_x_overall_min = math.inf
-    global_point_x_overall_max = -math.inf
-    global_point_x_overall_max_with_text = -math.inf
-    global_point_y_overall_min = math.inf
-    global_point_y_overall_max = -math.inf
+
+    for extra_save, filename in extra_saves:
+        with open(os.path.join(texts_output, filename % (title,)), "wt") as f:
+            for entry in extra_save:
+                print(entry, file=f)
+
+def include_emphasized(word, params):
+    return params.include_all_terms_to_emphasize and word_in_terms_to_emphasize(word, params)
     
+
+subword_re = re.compile("[- ]")
+
+def subword_match(word, wordlist):
+    subwords = subword_re.split(word)
+    matched_subwords = [subword in wordlist for subword in subwords]
+    return any(matched_subwords)
+
+def extra_kwargs_for_TfidfVectorizer(params):
+    extra_kwargs = {}
+    if params.token_pattern is not None:
+        extra_kwargs["token_pattern"] = params.token_pattern
+    return extra_kwargs
+
+def vectorize_max_df(texts, stopwords, params):
+    max_df_vectorizer = TfidfVectorizer(stop_words=stopwords, min_df=params.min_df, max_df=params.max_df, smooth_idf=False, sublinear_tf=False, ngram_range = params.ngrams, use_idf=params.idf, norm=None, lowercase=params.lowercase, **extra_kwargs_for_TfidfVectorizer(params))
+    print("nr of texts", len(texts))
+    start_time = time.time()
+    max_df_X = max_df_vectorizer.fit_transform(texts)
+    print("fit_transform max_df_set", time.time()-start_time)
+    max_df_set = set(max_df_vectorizer.vocabulary_)
+
+    return max_df_set
+
+# A local vectorizer for just each text, to count frequencies in each text and save in freq_dict_list
+def vectorize_one_text(text, stopwords, params):
+    freqs_for_entire_corpora = Counter()
+    freq_vectorizer = TfidfVectorizer(sublinear_tf=False, ngram_range = params.ngrams, use_idf=False, norm=None, stop_words=stopwords, lowercase=params.lowercase, **extra_kwargs_for_TfidfVectorizer(params))
+    start_time = time.time()
+    freq_X = freq_vectorizer.fit_transform([text])
+    print("fit_transform onetext", time.time()-start_time)
+    freqency_inversed = freq_vectorizer.inverse_transform(freq_X)
+    freq_list = []
+    freq_dict = {}
+    for words, freqs in zip(freqency_inversed, freq_X):
+        score_vec = freqs.toarray()[0]
+        for word in words:
+            freq_for_word = score_vec[freq_vectorizer.vocabulary_[word]]
+            freq_dict[word] = freq_for_word
+
+            # To count the total frequency for a word, in all texts
+
+            freqs_for_entire_corpora[word] += freq_for_word
+    return freq_dict, freqs_for_entire_corpora
+
+def vectorize_corpus(texts, names, word2vec_model, output_folder, params):
+    stopwords = list(params.stopwords)
+
+    # For tf-idf
+    ############
+        
+    freq_dict_list = [] # A list of word freqencies-dictionaries for each document
+    freqs_for_entire_corpora = Counter()
+
+    vectorize_one_text_results = map(lambda text: vectorize_one_text(text, stopwords, params), texts)
+    for freq_dict, count in vectorize_one_text_results:
+        freqs_for_entire_corpora.update(count)
+        freq_dict_list.append(freq_dict)
+
+    # Create a vocabulary where all words with a frequencey < min_tf_in_corpora are excluded
+    vocabulary_to_use = set([word for (word, freq) in freqs_for_entire_corpora.items() if freq >= params.min_tf_in_corpora])
+
+    if params.max_df != 1.0 or params.min_df > 1:
+        print("before, max_df, min_df",  len(vocabulary_to_use))
+        max_df_set = vectorize_max_df(texts, stopwords, params)
+        vocabulary_to_use &= max_df_set
+        print("after, max_df, min_df", len(vocabulary_to_use))
+        
+    print("before",  len(vocabulary_to_use))
+    if params.include_all_terms_to_emphasize:
+        vocabulary_to_use |= set(params.terms_to_emphasize)
+    print("after", len(vocabulary_to_use))
+    
+    # Handle if the vocabulary is restricted
+    if params.restrict_vocabulary_to_this_list and params.restrict_vocabulary_requires_exact_match:
+         vocabulary_to_use &= set(params.restrict_vocabulary_to_this_list)
+    if params.restrict_vocabulary_to_this_list and not params.restrict_vocabulary_requires_exact_match:
+        vocabulary_to_use = [voc for voc in vocabulary_to_use if subword_match(voc, params.restrict_vocabulary_to_this_list)]
+    
+    # The main vectorizer, with the statistics to use for plotting
+    main_vectorizer = TfidfVectorizer(stop_words=stopwords, min_df=params.min_df, max_df=params.max_df, smooth_idf=False, sublinear_tf=False, ngram_range = params.ngrams, use_idf=params.idf, norm=None, vocabulary = vocabulary_to_use, lowercase=params.lowercase, **extra_kwargs_for_TfidfVectorizer(params))
+
+    print("len(texts), all texts inclusive", len(texts))
+    print("len(texts + background_corpus)", len(texts + params.background_corpus))
+
+    start_time = time.time()
+    main_vectorizer.fit_transform(texts + params.background_corpus)
+    print("fit_transform final", time.time()-start_time)
+    start_time = time.time()
+    X = main_vectorizer.transform(texts)
+    print("fit_transform final transform", time.time()-start_time)
+    inversed = main_vectorizer.inverse_transform(X)
+    vocabulary = main_vectorizer.vocabulary_
+    
+    word_scores_per_graph_before_cutoff = []
+    for el, w, freq_dict in zip(inversed, X, freq_dict_list):
+        sum_all_word_frequencies = calculate_word_frequencies_sum(freq_dict)
+        score_vec = w.toarray()[0]
+        word_score_vec = [
+            WordScore(score_vec[vocabulary[word]], word, include_emphasized(word, params), freq_dict[word], freq_dict[word]/sum_all_word_frequencies)
+            for word in el
+        ]
+        word_scores_per_graph_before_cutoff.append(word_score_vec)
+         
+    # Create space (and score statistics):
+    
+        
+    # Only plot top nr_of_words_to_show words
+    # And also, filter out too infrequent words (from the parameter min_f_in_current_document)
+    # Here filtering on text-level is performed (in contrast to corpora level)
+    # Also apply the nr_of_words_to_show cut-off
+    
+    # Make configurable transformation, if there is one
+    if params.transform_word_scores:
+        word_scores_per_graph_before_cutoff = params.transform_word_scores(word_scores_per_graph_before_cutoff)
+        
+    assert not any(sw.score < 0 for sw in flatten_iter(word_scores_per_graph_before_cutoff)), "Scores need to be positive"
+
+    sorted_word_scores_per_graph = []
+    for word_scores in word_scores_per_graph_before_cutoff:
+        word_scores = sorted(word_scores, key=lambda sw: (sw.force_inclusion, sw.score, sw.word), reverse=True)
+        sorted_word_scores_per_graph.append(sorted(
+            islice(
+                filter(
+                    lambda sw: sw.force_inclusion or sw.freq >= params.min_f_in_current_document,
+                    word_scores),
+                params.nr_of_words_to_show),
+            reverse=True))
+
+    word_to_use_set = set()
+    new_words_lists = []
+    assert len(names) == 1 or names[-1] == ALL_FOLDERS_NAME
+    for word_scores in sorted_word_scores_per_graph:
+        words = {sw.word for sw in word_scores}
+        # Calculate difference between this corpus and previous (cut-off-filtered) corpora
+        new_words_lists.append(words - word_to_use_set)
+        word_to_use_set |= words
+
+    all_vectors_list = []
+    found_words = []
+    not_found_words = []
+
+    
+    # It is possible to add extra words, not found in the corpus, to be
+    # part of the projection, as might be needed for other visualisations
+    words_to_generate_space_for = word_to_use_set
+    if params.extra_words:
+        words_to_generate_space_for = words_to_generate_space_for.union( set(params.extra_words))
+        
+    words_to_generate_space_for = sorted(list(set(words_to_generate_space_for)))
+    print("Nr of words to generate space for:", len(words_to_generate_space_for))
+    
+    for word in words_to_generate_space_for:
+        # Add vectors
+        norm_vector = get_vector_for_word(word, word2vec_model, params.ngrams)
+        if norm_vector == None:
+            not_found_words.append(word)
+        else:
+            found_words.append(word)
+            all_vectors_list.append(norm_vector)
+                    
+    all_vectors_np = np.array(all_vectors_list)
+    print("len(all_vectors_list)", len(all_vectors_list))
+    
+    
+    extra_saves = []
+
+    if DEBUG_VECTORS:
+        extra_saves.append((all_vectors_list, "word-vectors-%s.txt"))
+        extra_saves.append((found_words, "words-%s.txt"))
+
+    if params.use_saved_vectors:
+        DX = np.load(params.use_saved_vectors)
+    else:
+        n_components = min(50, len(all_vectors_list))
+        if params.nr_of_clusters is None:
+            pca_model = PCA(n_components=n_components, random_state=0)
+            tsne_model = TSNE(n_components=1, random_state=0, perplexity=min(30, n_components-1))
+            DX_pca = pca_model.fit_transform(all_vectors_np)
+            if DEBUG_VECTORS:
+                extra_saves.append((DX_pca, "word-vectors-pca-%s.txt"))
+            DX = tsne_model.fit_transform(DX_pca)
+            if DEBUG_VECTORS:
+                extra_saves.append((DX, "word-vectors-tsne-%s.txt"))
+        else:
+            agg_clustering = AgglomerativeClustering(n_clusters=params.nr_of_clusters)
+            agg_DX_clustering = agg_clustering.fit_predict(all_vectors_np)
+            clf = NearestCentroid()
+            clf.fit(all_vectors_np, agg_DX_clustering)
+            centroids = [clf.centroids_[i] for i in agg_DX_clustering]
+            distances = [(orig - centroid)/2 for (orig, centroid) in zip(all_vectors_np, centroids)]
+            new_vectors_moved_towards_centroid = np.asarray([orig - distance for (orig, distance) in zip(all_vectors_np, distances)])
+            tsne_model = TSNE(n_components=1, random_state=0, perplexity=min(50, n_components-1))
+            DX = tsne_model.fit_transform(new_vectors_moved_towards_centroid)
+    if params.save_vectors:
+        save_vectors_in = os.path.join(output_folder, "saved_tsne_projection.npy")
+        print("save tsne projection in", save_vectors_in)
+        np.save(save_vectors_in, DX)
+        
+    word_vec_dict = {}
+    for point, found_word in zip(DX, found_words):
+        word_vec_dict[found_word] = float(point[0])
+    max_x = max(word_vec_dict.values())
+    min_x = min(word_vec_dict.values())
+
+    # Add a point on the x axis for words not found in the space, based on the characters in the word
+    for word in not_found_words:
+        print("Use random point for ", word)
+        x_point = get_word_x_from_hash(word, min_x, max_x)
+        word_vec_dict[word] = x_point
+
+    word_info_matrix = [
+        [
+            WordInfo(ws.score, ws.word, word_vec_dict[ws.word], ws.freq, ws.relfreq)
+            for ws in word_scores
+        ]
+        for word_scores in sorted_word_scores_per_graph
+    ]
+
+    if output_folder is not None:
+        write_scores(output_folder, word_info_matrix, names, new_words_lists, extra_saves)
+
+    # Apart from writing new words to file (as is done above), the first plot should mark no words as new
+    new_words_lists[0] = []
+
+    return word_info_matrix, new_words_lists, min_x, max_x
+
+def json_serialize_set(o):
+    if isinstance(o, set):
+        return sorted(o)
+    return o
+
+def generate_plotdata(output_folder, word_info_matrix, names, new_words_lists, min_x, max_x, params):
+    max_scores = []
+    min_scores = []
+    assert isinstance(word_info_matrix[0][0], WordInfo), "word_info_matrix has to be Iterable[Iterable[WordInfo]]"
+    for word_scores, title in zip(word_info_matrix, names):
+        fontsize_falloff_rate = get_fontsize_falloff_rate(params, title)
+
+        max_score = max([sw.score for sw in word_scores])
+        max_score = apply_fontsize_falloff_rate(max_score, fontsize_falloff_rate)
+        max_scores.append(max_score)
+
+        min_score = min([sw.score for sw in word_scores])
+        min_score = apply_fontsize_falloff_rate(min_score, fontsize_falloff_rate)
+        min_scores.append(min_score)
+
+
     actual_plotted_word_size_dict_list = []
-    
-    max_score_except_all = max(max_scores)
+
+    if params.use_global_max_score and len(word_info_matrix) > 1:
+        max_score_except_all = max(max_scores[:-1])
+        for i in range(len(max_scores[:-1])):
+            max_scores[i] = max_score_except_all
+
+    word_plot_info_matrix = rewrite_scores(word_info_matrix, max_scores, params, names, new_words_lists)
     
     # Make one first run, just to get the global max and min point (but don't save the result)
-    for inverse, sorted_word_scores, title, min_score, new_words, plot_nr, terms_to_emphasize, freq_dict in zip(inversed, sorted_word_scores_matrix, names, min_scores, new_words_lists, range(0, len(names)), terms_to_emphasize_list, freq_dict_list):
+    actual_text_boundary_xs = []
+    for sorted_word_scores, title, min_score, new_words, plot_nr in zip(word_plot_info_matrix, names, min_scores, new_words_lists, range(0, len(names))):
     
-        max_score_to_use_in_round = max_score_except_all
-        
-         
-        # Either use global or visualisation-local max_score, except for "all".
-        if title == ALL_FOLDERS_NAME:
-            max_score_to_use_in_round = max_all_plot
-        elif not use_global_max_score:
-            max_score_to_use_in_round = max_scores[plot_nr]
-            
-        main_fig = plt.figure()
-        plt.axis('off')
-        point_x_overall_min, point_x_overall_max, point_y_overall_min, point_y_overall_max, point_x_overall_max_with_text, used_colors_list, actual_plotted_word_size_dict = \
-            do_plot(main_fig, word_vec_dict, sorted_word_scores, title, idf, ngram_range, x_length_factor, times_found_dict, nr_of_texts, max_score_to_use_in_round, min_score, new_words, extra=extra, fontsize=fontsize, y_length_factor=y_length_factor, plot_nr = plot_nr, same_y_axis = same_y_axis, mark_new_words=mark_new_words, bar_height_boost=bar_height_boost, bar_strength_boost=bar_strength_boost, bar_start_boost=bar_start_boost, all_projected_xs = all_projected_xs, add_title=add_title, terms_to_emphasize=terms_to_emphasize, log_for_bar_height=log_for_bar_height, terms_to_emphasize_list_require_exact_match_ngrams=terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse=terms_to_emphasize_inverse, scale_max_x_used=scale_max_x_used, freq_dict=freq_dict, min_f_in_current_document=min_f_in_current_document, show_number_of_occurrences=show_number_of_occurrences, plot_mushroom_head=plot_mushroom_head, y_extra_space_factor=y_extra_space_factor, y_extra_pow_factor=y_extra_pow_factor, above_below_ratio=above_below_ratio, show_words_outside_ylim = show_words_outside_ylim, nr_of_vertical_lines = nr_of_vertical_lines)
+        max_score_to_use_in_round = max_scores[plot_nr]
+        #matplotlib.rcParams['figure.figsize'] = [6.4,4.8*2]
+        #main_fig = plt.figure(figsize=(6.4,4.8*2))
+        if pdfBackendEnabled:
+            main_fig = pdfgen.MatplotlibShimPdf(None, pagesize = params.pagesize)
+        else:
+            main_fig = pyplot.figure()
+        main_fig.gca().set_axis_off()
+
+        actual_plotted_word_size_dict, actual_min_x, actual_max_x = \
+            do_plot_prepare(main_fig, sorted_word_scores, title, max_score_to_use_in_round, new_words, min_x, max_x, params)
          
         actual_plotted_word_size_dict_list.append(actual_plotted_word_size_dict)
+
+        if params.unified_graph and title == ALL_FOLDERS_NAME:
+            pass
+        else:
+            actual_text_boundary_xs.append(actual_min_x)
+            actual_text_boundary_xs.append(actual_max_x)
         
-        # TODO: These are not used anymore
-        if point_x_overall_min < global_point_x_overall_min:
-            global_point_x_overall_min = point_x_overall_min
-        if point_x_overall_max > global_point_x_overall_max:
-            global_point_x_overall_max = point_x_overall_max
-        if point_x_overall_max_with_text > global_point_x_overall_max_with_text:
-            global_point_x_overall_max_with_text = point_x_overall_max_with_text
-        if point_y_overall_min < global_point_y_overall_min:
-            global_point_y_overall_min = point_y_overall_min
-        if point_y_overall_max > global_point_y_overall_max:
-            global_point_y_overall_max = point_y_overall_max
-          
         main_fig.clf()
-        plt.close('all')
-            
-    extreme_values_tuple = (global_point_x_overall_min, global_point_x_overall_max, \
-                global_point_y_overall_min, global_point_y_overall_max, global_point_x_overall_max_with_text)
-                
-    # Make one another run and save the results in images
-    for inverse, sorted_word_scores, title, new_words, plot_nr, terms_to_emphasize, freq_dict, actual_plotted_word_size_dict in zip(inversed, sorted_word_scores_matrix, names,  new_words_lists, range(0, len(names)), terms_to_emphasize_list, freq_dict_list, actual_plotted_word_size_dict_list):
-    
-        # Either use global or visualisation-local max_score, except for "all".
-        max_score_to_use_in_round = max_score_except_all
-        if title == ALL_FOLDERS_NAME:
-            max_score_to_use_in_round = max_all_plot
-        elif not use_global_max_score:
-            max_score_to_use_in_round = max_scores[plot_nr]
-            
-        main_fig = plt.figure()
-        plt.axis('off')
-        do_plot_args = [
-        word_vec_dict,
-        sorted_word_scores, title, idf, ngram_range,
-        x_length_factor, times_found_dict, nr_of_texts,
-        max_score_to_use_in_round, min_score, new_words
-        ]
-        do_plot_kwargs = {}
-        do_plot_kwargs.update(extra = extra, fontsize=fontsize, y_length_factor=y_length_factor, plot_nr = plot_nr, same_y_axis = same_y_axis, mark_new_words=mark_new_words, bar_height_boost=bar_height_boost, bar_strength_boost=bar_strength_boost, bar_start_boost=bar_start_boost, all_projected_xs = all_projected_xs,  extreme_values_tuple = extreme_values_tuple, add_title=add_title, terms_to_emphasize=terms_to_emphasize, log_for_bar_height=log_for_bar_height, terms_to_emphasize_list_require_exact_match_ngrams=terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse=terms_to_emphasize_inverse, scale_max_x_used=scale_max_x_used, freq_dict=freq_dict, min_f_in_current_document=min_f_in_current_document, show_number_of_occurrences=show_number_of_occurrences, plot_mushroom_head=plot_mushroom_head, actual_plotted_word_size_dict=actual_plotted_word_size_dict, y_extra_space_factor=y_extra_space_factor, y_extra_pow_factor=y_extra_pow_factor, above_below_ratio=above_below_ratio, show_words_outside_ylim=show_words_outside_ylim, nr_of_vertical_lines = nr_of_vertical_lines)
-        file_name = os.path.join(output_folder, construct_pdf_file_name(title, idf, ngram_range, output_folder))
+        if not pdfBackendEnabled:
+            pyplot.close('all')
+
+    return word_plot_info_matrix, actual_plotted_word_size_dict_list, max_scores, min(actual_text_boundary_xs), max(actual_text_boundary_xs)
+
+
+def apply_fontsize_falloff_rate(score, fontsize_falloff_rate):
+    if fontsize_falloff_rate:
+        return math.pow(score, fontsize_falloff_rate)
+    return score
+
+def rewrite_scores(word_info_matrix, max_scores, params, names, new_words_lists):
+    fontsize_falloff_rates = [get_fontsize_falloff_rate(params, title) for title in names]
+    return [[WordPlotInfo.create(sws, apply_fontsize_falloff_rate(sws.score, fontsize_falloff_rate), max_score, get_word_to_display(sws, title, new_words, params), params) for sws in sorted_word_scores] for sorted_word_scores, fontsize_falloff_rate, max_score, title, new_words in zip(word_info_matrix, fontsize_falloff_rates, max_scores, names, new_words_lists)]
+
+def save_plotdata(output_folder, sorted_word_scores, title, min_x, max_x, max_score_to_use_in_round, new_words, actual_plotted_word_size_dict=None):
+    if output_folder is not None:
+        file_name = os.path.join(output_folder, construct_pdf_file_name(title, output_folder))
         with open(file_name + ".json", "wt") as json_file:
-            json.dump({"args":do_plot_args,"kwargs":do_plot_kwargs}, json_file)
-            
-        main_fig.clf()
-        plt.close('all')
+            json.dump({
+                "sorted_word_scores":sorted_word_scores,
+                "title":title,
+                "min_x": min_x,
+                "max_x": max_x,
+                "max_score_to_use_in_round": max_score_to_use_in_round,
+                "new_words": new_words,
+                "actual_plotted_word_size_dict":actual_plotted_word_size_dict
+            }, json_file, default=json_serialize_set)
 
-"""
-def plot_round(json_data):
-        main_fig = plt.figure()
-        plt.axis('off')
-        do_plot_json = json.loads(json_data)
-        point_x_overall_min, point_x_overall_max, point_y_overall_min, point_y_overall_max, point_x_overall_max_with_text, used_colors_list, actual_plotted_word_size_dict = \
-        do_plot(main_fig, *do_plot_json["args"], **do_plot_json["kwargs"])
-        do_plot_json["kwargs"].update(actual_plotted_word_size_dict=actual_plotted_word_size_dict)
-        main_fig.clf()
-        plt.close('all')
-        return json.dumps(do_plot_json)
-"""
+def plot_from_plotdata(output_folder, word_plot_info_matrix, names, new_words_lists, actual_plotted_word_size_dict_list, max_scores, min_x, max_x, actual_min_x, actual_max_x, params):
+    # Make one another run and save the results in images
 
+    images = []
+    cropboxes = []
+    if params.unified_graph:
+        assert pdfBackendEnabled
+        image = BytesIO()
+        if len(names) > 1:
+            ngraphs = len(names) - 1
+        else:
+            ngraphs = 1
+        main_fig = pdfgen.MatplotlibShimPdf(image, pagesize = params.pagesize, subgraphs=ngraphs, compact=params.compact)
 
-def plot_from_plotdata(names, idf, ngram_range, output_folder, json_datas, nr_of_words_in_bar_plot):
-    for title, json_data in zip(names, json_datas):
-        file_name = os.path.join(output_folder, construct_pdf_file_name(title, idf, ngram_range, output_folder))
-        main_fig = plt.figure()
-        plt.axis('off')
-        do_plot_json = json.loads(json_data)
-        
-        
-        do_plot(main_fig, *do_plot_json["args"], **do_plot_json["kwargs"])
- 
-        #plt.tight_layout()
-        #orientation = "landscape",
-        plt.savefig(file_name,  format="pdf", bbox_inches='tight', pad_inches=0)
-        print("Saved plot in " + file_name)
-        plt.close('all')
-        
-        sorted_word_scores = do_plot_json["args"][1]
-        freq_dict = do_plot_json["kwargs"]["freq_dict"]
-        min_f_in_current_document = do_plot_json["kwargs"]["min_f_in_current_document"]
-        add_title = do_plot_json["kwargs"]["add_title"]
-        # Figure with only frequencies
-        bar_fig = plt.figure()
-        plt.rcParams['ytick.labelsize']= 240/nr_of_words_in_bar_plot#4
-        ax = plt.gca()
-        ax.get_xaxis().set_visible(False)
-        ax.tick_params(axis='both', which='both', length=0)
-        ax.grid(False)
-        ax.spines[['right', 'top', 'bottom', 'left']].set_visible(False)
-        bar_file_name = file_name.replace(".pdf", "_bars.pdf")
-        
-        most_common = sorted_word_scores[:nr_of_words_in_bar_plot]
-        freqs = [round(x, 1) for (x,y) in most_common]
-        words = []
-        for (x, y) in most_common:
-            word = y + " " + str(round(x,1))
-            if y in freq_dict:
-                word = word + "(" + str(int(freq_dict[y])) + ")"
-            words.append(word)
-            
-        assert(len(freqs) == len(words))
-        
-        ax.barh(words, freqs, height=24/nr_of_words_in_bar_plot)
-        ax.invert_yaxis()
-        ax.invert_xaxis()
-        ax.yaxis.set_label_position("right")
-        ax.yaxis.tick_right()
-        title_to_use = "\n" + title
-        title_to_use = latex_clean(title_to_use)
-        title_fontsize = 10/math.log(len(title_to_use) + 3)*1.6
-        if add_title:
-            plt.title(title_to_use, fontsize=title_fontsize)
-        
-        plt.savefig(bar_file_name, orientation = "landscape", format="pdf", bbox_inches='tight', pad_inches=0)
-        
-        
-        print("Saved plot in " + bar_file_name)
-        plt.close('all')
+    for sorted_word_scores, title, new_words, plot_nr, actual_plotted_word_size_dict in zip(word_plot_info_matrix, names,  new_words_lists, range(0, len(names)), actual_plotted_word_size_dict_list):
 
+        max_score_to_use_in_round = max_scores[plot_nr]
 
-####
-# The main function for generating the word rain
-####
-#
-# scale_max_x_used: the extra space to the right, to make sure all words are in the picture
-#
-# Take care with the following: 'min_df_in_document' is a global cut-off. It removes words that occur less
-# than 'min_df_in_document' in any document to be plotted anywhere. It is not that practical, and is only left for
-# backward compatibility
-#
-# min_tf_in_corpora is also a global cut-off.
-# it removes words that occur less than min_tf_in_corpora in the entire corpus to be plotted anywhere.
-# Can for instance be matched with the same cut-off when creating a word2vec-model, to make sure that all words have a matching vector
-#
-#
-# min_f_in_current_document is a local cut-off. It excludes words to be plotted that only occur rarely in the document that is plotted. The default is 1. If it is smaller than 1, it will be interpreted as a proportion (which migh be a bit tricky to callibrate). 
-#
-# The font size will never be smaller than 1. Therefore, if you use to small font size for the largest words, the word rain will get boring, with most words in font size 1.
-# include_all_terms_to_emphasize is default False. When true, all words in all_terms_to_emphasize are plotted (if included in the corpus), regardless of their min-tf and max-tf etc. (but the cut-off of top n, still holds though. So if their prominence is lower than other words, they willl still not be included)
-# above_below_ratio: Decides how large part of the image will be above 0 (as bars) and how much will be below (words). Default is 2, i.e. double the space for the words compared to the bars.
-# show_number_of_occurrences: False to don't show number of occurrences in paranthesis. Otherwise, the maximum number of occurrences, for which to show the the occurrences in paranthesis
-# nr_of_words_to_show: The top nr_of_words_to_show. If None, it is set to math.inf. Don't do that if you don't have a very small data set though, because it will be take a very, very long time.
-# nr_of_vertical_lines: How many vertical lines to print. Default is 0
-# use_global_max_score: If the max score (and also how large the words become on the plot), should be determined locally or globally).
-# log_for_bar_height: use logarithm for max_score and score. When there are large differences.
-# save_vectors: Save the vectors corresponding to the words visualised, so that they can be reused by another visualisation.
-# # use_additional_saved_vectors: Load previously save vectors from another visualisation, to use. The point with this (and "save_vectors" is to be able to have a similar projection for two different visualisations")
+        if params.unified_graph:
+            if title == ALL_FOLDERS_NAME:
+                continue
+            main_fig.set_subgraph(plot_nr)
+        else:
+            image = BytesIO()
+            if pdfBackendEnabled:
+                main_fig = pdfgen.MatplotlibShimPdf(image, pagesize = params.pagesize, compact=params.compact)
+            else:
+                main_fig = pyplot.figure()
+        if not pdfBackendEnabled:
+            pyplot.axis('off')
 
-# NOT VERY USEFUL. BUT KEPT, AS IT MIGHT GIVE A POSSIBILITY FOR FINE-TUNING
-# These are not very useful. Might be kept a while, but will be removed later
-# y_extra_pow_factor: the y-space that a word is allowed to take is factored by the (font size of that word)^0.5 as a default. By y_extra_pow_factor ^0.5 can be modified.
-# y_extra_space_factor: also, the y-space that a word is allowed to take can be factored by y_extra_space_factor. This is 1 by default.
+        save_plotdata(output_folder, sorted_word_scores, title, min_x, max_x, max_score_to_use_in_round, new_words,
+                actual_plotted_word_size_dict=actual_plotted_word_size_dict)
+        do_plot(main_fig, sorted_word_scores, title, min_x, max_x, max_score_to_use_in_round, new_words, params,
+                actual_plotted_word_size_dict=actual_plotted_word_size_dict)
+        if pdfBackendEnabled:
+            main_fig.register_point_x(actual_min_x)
+            main_fig.register_point_x(actual_max_x)
 
+        if not params.unified_graph:
+            main_fig.savefig(image,  format="pdf", pad_inches=0)
+            image.seek(0)
+            images.append(image)
+            if pdfBackendEnabled:
+                cropboxes.append(main_fig.bbox.rectbox())
+            else:
+                cropboxes.append(None)
+        print("Generated image")
+        if not pdfBackendEnabled:
+            pyplot.close('all')
+    if params.unified_graph:
+        main_fig.savefig(image)
+        image.seek(0)
+        images.append(image)
+        cropboxes.append(main_fig.bbox.rectbox())
+    return images, cropboxes
 
-# DEPRECATED, WILL BE REMOVED:
-# bar_height_boost
-# nr_iterations_for_fine_ajusting_the_placement: the plot algorithm is run several times, fine-justing the word positioning. The default is to run the fine-justing 1 time.
-# same_y_axis is not used currently
-# x_length_factor is not used, will be removed
-# y_length_factor is (in the most recent version) only used as a factor for governing the height of the bars.
+def tex_header(folder_title, output_folder):
+    tex_str = """
+            \\documentclass{beamer}
+            \\usepackage[utf8]{inputenc}
+            \\beamertemplatenavigationsymbolsempty
+            \\usetheme{default}
+            \\setbeamertemplate{headline}{}
+            """
+    tex_str = tex_str + \
+            """
+            \\title{
+            """
+    tex_str = tex_str + latex_clean(folder_title + " " + clean_folder_name(output_folder))
+    tex_str = tex_str + \
+            """
+            }
+            \\author{}
 
+            \\usepackage{graphicx}
+            \\begin{document}
 
-def generate_clouds(corpus_folder, word2vec_model, output_folder, ngrams=NGRAMS, nr_of_words_to_show = NR_OF_WORDS_TO_SHOW, x_length_factor = X_LENGTH, stopwords=[], background_corpus=[], pre_process_method = None, idf = True, extra_words_path = None, y_length_factor = Y_LENGTH, fontsize=FONTSIZE, same_y_axis=True, mark_new_words=False, min_df=1, max_df=1.0, add_title=True, bar_height_boost=1, bar_strength_boost=1, bar_start_boost = 1, terms_to_emphasize_list = [], log_for_bar_height=False, min_df_in_document=None, terms_to_emphasize_list_require_exact_match_ngrams=False, terms_to_emphasize_inverse=False, scale_max_x_used=1.3, slide_show=False, min_f_in_current_document=1, monospace=True, show_number_of_occurrences=False, nr_of_words_in_bar_plot=NR_OF_WORDS_IN_BAR_PLOT, plot_mushroom_head=True, pre_process_data=None, min_tf_in_corpora=1,  lowercase=True, include_all_terms_to_emphasize=False, y_extra_space_factor=1.0, y_extra_pow_factor=0, nr_iterations_for_fine_ajusting_the_placement=0, above_below_ratio = ABOVE_BELOW_RATIO, use_global_max_score=False, show_words_outside_ylim=False, nr_of_vertical_lines = 0, save_vectors=False, use_additional_saved_vectors=False, restrict_vocabulary_to_this_list=None):
+            \\maketitle
+                    
+            """
+    return tex_str
 
-    if monospace:
-        matplotlib.rcParams["font.family"] = "monospace"
-        
-    # Since there is also one batch with all texts, which will add the
-    # term frequency with one
-    if isinstance(min_df, int):
-        min_df = min_df + 1
-    if isinstance(max_df, int):
-        max_df = max_df + 1
-        
-    stopwords = list(stopwords)
-    
-    extra_words = []
-    if extra_words_path:
-        pn = os.path.join(extra_words_path, "*.txt")
-        print("Extra words in", pn)
-        files = glob.glob(pn)
-        for f in files:
-            with open(f) as opened:
-                for line in opened:
-                    extra_words.append(line.split("\t")[0])
-   
-    # Read texts that are to be visualised
+def tex_file_entry(pdf_file_name):
+    tex_str = """
+                            \\begin{frame}
+                            \\vspace*{-0.7cm}\hspace*{-2.1cm}\\includegraphics[width=15.1cm]{"""
+    tex_str = tex_str + pdf_file_name
+    tex_str = tex_str + "}"
+    tex_str = tex_str + "\\end{frame}"
+    return tex_str
+
+def generate_tex_file(names, corpus_folder, output_folder):
+    pdf_file_names = [construct_pdf_file_name(name, output_folder) for name in names]
+    folder_title = os.path.basename(corpus_folder.rstrip("/"))
+
+    tex_str = tex_header(folder_title, output_folder)
+    for pdf_file_name in pdf_file_names:
+        tex_str += tex_file_entry(pdf_file_name)
+
+    tex_str = tex_str + "\\end{document}"
+    tex_output = os.path.join(output_folder, folder_title + "-" + clean_folder_name(output_folder) + ".tex")
+    with open(tex_output, "w") as write_tex:
+        write_tex.write(tex_str)
+
+def read_corpus_folder(corpus_folder, pre_process_method):
     names = []
     texts = []
-  
-    folder_title = os.path.basename(corpus_folder)
-    if folder_title.strip() == "":
-        folder_title = os.path.basename(os.path.split(corpus_folder)[0])
-
     if not os.path.exists(corpus_folder):
         print("folder not found: ", corpus_folder)
         print("exit without plotting ", corpus_folder)
@@ -1080,34 +1110,7 @@ def generate_clouds(corpus_folder, word2vec_model, output_folder, ngrams=NGRAMS,
             folder_names.append((folder_name, folder_name, fn))
     
     folder_names.sort()
-   
-    if not os.path.exists(output_folder):
-        os.mkdir(output_folder)
-        
-    tex_str = """
-            \\documentclass{beamer}
-            \\usepackage[utf8]{inputenc}
-            """
-    #if not slide_show:
-    #    tex_str = tex_str + "\\usepackage[orientation=portrait,size=a4]{beamerposter}"
-    tex_str = tex_str + \
-            """
-            \\title{
-            """
-    tex_str = tex_str + latex_clean(folder_title + " " + get_extra_indicator(idf, ngrams, output_folder))
-    tex_str = tex_str + \
-            """
-            }
-            \\author{}
 
-            \\usepackage{graphicx}
-            \\begin{document}
-
-            \\maketitle
-                    
-            """
-    bar_tex_str = tex_str
-    texts_in_all_folders = []
     for number_name, folder_name, folder in folder_names:
         print("Reading files from: ", folder)
         #folder_name = unicodedata.normalize("NFC", os.path.basename(os.path.split(folder)[0]))
@@ -1121,96 +1124,190 @@ def generate_clouds(corpus_folder, word2vec_model, output_folder, ngrams=NGRAMS,
             with open(f) as openfile:
                 text_in_file = openfile.read()
                 if pre_process_method:
-                    if pre_process_data:
-                        text_in_file = pre_process_method(text_in_file, pre_process_data)
-                    else:
-                        text_in_file = pre_process_method(text_in_file)
+                    text_in_file = pre_process_method(text_in_file)
                 texts_in_folder.append(text_in_file)
-                texts_in_all_folders.append(text_in_file)
         all_text_in_folder = "\n".join(texts_in_folder)
         
         texts.append(all_text_in_folder) # all files in folder to one text
         names.append(folder_name)
-        
-        
-        
-        pdf_file_name  = construct_pdf_file_name(folder_name, idf, ngrams, output_folder)
-        pdf_file_name_bar = pdf_file_name.replace(".pdf", "_bars.pdf")
-        tex_str = tex_str + """
-                            \\begin{frame}
-                            \\includegraphics[width=\\textwidth]{"""
-        tex_str = tex_str + pdf_file_name
-        tex_str = tex_str + "}"
-        tex_str = tex_str + "\\end{frame}"
-        
-        bar_tex_str = bar_tex_str + """
-                            \\begin{frame}
-                            """
-        bar_tex_str = bar_tex_str + """
-                            \\begin{center}
-                            \\includegraphics[width=0.8\\textwidth]{"""
-        bar_tex_str = bar_tex_str + pdf_file_name_bar
-        bar_tex_str = bar_tex_str + """}
-                            \\end{center}
-                            \\end{frame}
-                            """
-                            
+    return texts, names
 
-    all_file_name = construct_pdf_file_name(ALL_FOLDERS_NAME, idf, ngrams, output_folder)
-    pdf_file_name_bar = all_file_name.replace(".pdf", "_bars.pdf")
-    texts.append("\n".join(texts_in_all_folders)) # all files in all folders to one text
-    names.append(ALL_FOLDERS_NAME)
-    tex_str = tex_str + """
-                            \\begin{frame}
-                            \\includegraphics[width=\\textwidth]{"""
-    tex_str = tex_str + all_file_name
-    tex_str = tex_str + "}"
-    tex_str = tex_str + "\\end{frame}"
+
+def word_info_restore(word_info_matrix):
+    return [
+        [
+            WordInfo(*word_info)
+            for word_info in word_info_list
+        ]
+        for word_info_list in word_info_matrix
+    ]
+
+
+####
+# The main function for generating the word rain
+####
+#
+# scale_max_x_used: the extra space to the right, to make sure all words are in the picture
+# min_tf_in_corpora is a global cut-off.
+# it removes words that occur less than min_tf_in_corpora in the entire corpus to be plotted anywhere.
+# Can for instance be matched with the same cut-off when creating a word2vec-model, to make sure that all words have a matching vector
+# min_f_in_current_document is a local cut-off. It excludes words to be plotted that only occur rarely in the document that is plotted. The default is 1.
+# fontsize The font size will never be smaller than 1. Therefore, if you use to small font size for the largest words, the word rain will get boring, with most words in font size 1.
+# include_all_terms_to_emphasize is default False. When true, all words in all_terms_to_emphasize are plotted (if included in the corpus), regardless of their min-tf and max-tf etc. (but the cut-off of top n, still holds though. So if their prominence is lower than other words, they willl still not be included)
+# bar_ratio: Decides how large part of the image will be above 0 (as bars). Default is 1/3, i.e. one third of the page for the bars and two thirds for the words.
+# show_number_of_occurrences: A number which dictates the maximum number of occurrences for a word if the number of occurrences is to be shown in paranthesis to the right of the word. If the number is given as an integer, the raw word occurrences is counted. If it is given as a float, the number of occurrences divided by the total number of words in the document is used. The default is False (= don't show any numbers).
+# nr_of_words_to_show: The top nr_of_words_to_show. If None, it is set to math.inf. Don't do that if you don't have a very small data set though, because it will be take a very, very long time.
+# nr_of_vertical_lines: How many vertical lines to print. Default is 0
+# use_global_max_score: If the max score (and also how large the words become on the plot), should be determined locally or globally). Default is False
+# fontsize_falloff_rate: The rate by which the font size decreases when the score descreases. A higher value exaggerates the differences between low and high scores, i.e., the font sizes decrease more quickly, which has the effect of make the graphs take up less vertical space. Therefore, if the graph does not fit within the  standard space for a wordrain graph, you might want to increase the fontsize_falloff_rate used. If the words shown are too compressed, you instead might want to decrease the fontsize_falloff_rate.
+# extra_words: A list of words to add to the projection. If the same projection is to be used for another visualisation, you might need to add words that are to be included in this future visualisation to the projection
+# save_vectors: Save the vectors corresponding to the words visualised, so that they can be reused by another visualisation.
+# use_saved_vectors: Load previously saved TSNE projection. The point with this (and "save_vectors" is to be able to have a similar projection for two different visualisations")
+# y_extra_space_factor: also, the y-space that a word is allowed to take can be factored by y_extra_space_factor. This is 1 by default.
+# fixed_linewidth_down: change the width of the line downwards that connects to the word. Default is 0.1, but e.g. for printing it might need to be thicker. If set to None, it will adapt to the thickness of the bar which it is connected to.
+
+
+
+import dataclasses
+from collections.abc import Iterable
+from collections.abc import Callable
+
+@dataclasses.dataclass(frozen=True)
+class Params:
+    ngrams: bool = NGRAMS
+    nr_of_words_to_show : int | None =  NR_OF_WORDS_TO_SHOW
+    stopwords: Iterable[str] = dataclasses.field(default_factory = list)
+    background_corpus: list[str] = dataclasses.field(default_factory = list)
+    pre_process_method : Callable[[str], str] | None =  None
+    idf : bool =  True
+    extra_words : Iterable[str] =  dataclasses.field(default_factory = list)
+    fontsize: float = FONTSIZE
+    mark_new_words: bool = False
+    min_df: int|float = 1
+    max_df: int|float = 1.0
+    add_title: bool = True
+    bar_strength_boost: float = 1
+    bar_start_boost : float =  1
+    terms_to_emphasize_list : Iterable[str] =  dataclasses.field(default_factory = list)
+    terms_to_emphasize : Collection[str] = dataclasses.field(init = False)
+    fontsize_falloff_rate: float = False
+    terms_to_emphasize_list_require_exact_match_ngrams: bool = False
+    terms_to_emphasize_inverse: bool = False
+    scale_max_x_used: float = 1.3
+    min_f_in_current_document: float = 1
+    monospace: bool = True
+    show_number_of_occurrences: bool = False
+    plot_mushroom_head: bool = True
+    min_tf_in_corpora: int = 1
+    lowercase: bool = True
+    include_all_terms_to_emphasize: bool = False
+    y_extra_space_factor: float = 1.0
+    bar_ratio: float = 1/3
+    use_global_max_score: bool = False
+    show_words_outside_ylim: bool = False
+    nr_of_vertical_lines : int =  0
+    save_vectors: bool = False
+    use_saved_vectors: str | None = None
+    restrict_vocabulary_to_this_list: Iterable[str] = None
+    fontpath: str = None
+    fixed_linewidth_down: float | None = 0.1
+    restrict_vocabulary_requires_exact_match: bool = False
+    transform_displayed_word: Callable[[str], str] | None = None
+    color_map: Callable[[float], list[float]] = None
+    rtl_text: bool = False
+    x_extra_space_factor: float = 1.0
+    plot_vertical_line_label: bool = True
+    draw_vertical_bars: bool = True
+    transform_word_scores: list[list[WordScore]] = None
+    unified_graph: bool = False
+    compact: bool = False
+    nr_of_clusters: int | None = None
+    background_box: bool = False
+    pagesize: (float, float) = (460,345)
+    token_pattern: str | None = None
+    left_margin : float =  0.001
+    right_margin : float =  0.3
+    margin : float =  1.1
+    vertical_line_width : float =  0.1
+    vertical_line_style : str =  "dotted"
+
+    def __post_init__(self):
+        if self.lowercase and self.terms_to_emphasize_list:
+            object.__setattr__(self, "terms_to_emphasize", lowercase_terms_to_emphasize(self.terms_to_emphasize_list))
+        else:
+            object.__setattr__(self, "terms_to_emphasize", list(self.terms_to_emphasize_list))
+
+    def updated(self, **kwargs):
+        return dataclasses.replace(self, **kwargs)
+
+def generate_clouds_vectorize(corpus_folder, word2vec_model, output_folder, params, corpus_texts=None):
+    if corpus_texts is None:
+        # Read texts that are to be visualised
+
+        texts, names = read_corpus_folder(corpus_folder, params.pre_process_method)
+    else:
+        texts = [text for name, text in corpus_texts]
+        names = [name for name, text in corpus_texts]
+
     
-    bar_tex_str  = bar_tex_str  + """
-                            \\begin{frame}
-                        """
-    bar_tex_str = bar_tex_str + """
-                            \\begin{center}
-                            \\includegraphics[width=0.8\\textwidth]{"""
-    bar_tex_str = bar_tex_str + pdf_file_name_bar
-    bar_tex_str = bar_tex_str + """}
-                            \\end{center}
-                            \\end{frame}
-                            """
     
-    tex_str = tex_str + "\\end{document}"
-    bar_tex_str = bar_tex_str + "\\end{document}"
-    tex_output = os.path.join(output_folder, folder_title + get_extra_indicator(idf, ngrams, output_folder) + ".tex")
-    bar_tex_output = tex_output.replace(".tex", "_bar.tex")
-    with open(tex_output, "w") as write_tex:
-        write_tex.write(tex_str)
-    with open(bar_tex_output, "w") as write_tex_bar:
-        write_tex_bar.write(bar_tex_str)
-        
+    if isinstance(params.fontsize_falloff_rate, dict):
+        for key in params.fontsize_falloff_rate.keys():
+            if (unicodedata.normalize("NFC",key) not in names and key != DEFAULT_FONTSIZE_FALLOFF_RATE):
+                print(f"key in fontsize_falloff_rate does not correspond to folder among text files to visualise: {key}")
+                print(f"Allowed keys are: {names}")
+                print("As well as the variable: 'wordrain.DEFAULT_FONTSIZE_FALLOFF_RATE'")
+                sys.exit(1)
+            
+    if len(texts) > 1:
+        names.append(ALL_FOLDERS_NAME)
+        texts.append("\n".join(texts)) # all files in all folders to one text
+
+        # To account for the 'all' batch, increase min_df and max_df by one
+        if isinstance(params.min_df, int):
+            params = params.updated(min_df = params.min_df + 1)
+        if isinstance(params.max_df, int):
+            params = params.updated(max_df = params.max_df + 1)
+
+    if output_folder is not None:
+        generate_tex_file(names, corpus_folder, output_folder)
+
     # Visualise the texts
-    
-    # To be able to run vectorize_and_generate_plotdata with a different list of terms to emphasise
-    # in each run. Here the same list is used in all runs
-    terms_to_emphasize_list_duplicates = []
-    for i in range(0, len(texts)):
-        terms_to_emphasize_list_duplicates.append(terms_to_emphasize_list)
-    
-    vectorize_and_generate_plotdata(background_corpus, texts, names, stopwords, word2vec_model, ngrams, nr_of_words_to_show, output_folder, x_length_factor, idf, extra_words, y_length_factor, fontsize, same_y_axis, mark_new_words, bar_height_boost, bar_strength_boost, bar_start_boost, min_df, max_df, add_title, terms_to_emphasize_list_duplicates, log_for_bar_height, min_df_in_document, terms_to_emphasize_list_require_exact_match_ngrams, terms_to_emphasize_inverse, scale_max_x_used, min_f_in_current_document, show_number_of_occurrences, plot_mushroom_head, min_tf_in_corpora, lowercase, include_all_terms_to_emphasize, y_extra_space_factor, y_extra_pow_factor, above_below_ratio, use_global_max_score, show_words_outside_ylim, nr_of_vertical_lines, save_vectors, use_additional_saved_vectors, restrict_vocabulary_to_this_list)
-    # The calculations whether the words collide are made from size plot data that can only be retrieved from matplotlib after the actual plotting is done. Therefore, several plots have to be made, where the exact positions are iteratively adjusted. As a default, one iteration is run.
-    plot_from_json(names, idf, ngrams, output_folder, nr_iterations_for_fine_ajusting_the_placement, nr_of_words_in_bar_plot)
+
+    if params.nr_of_words_to_show is None:
+        params = params.updated(nr_of_words_to_show = math.inf)
+        print("No cut-off is applied for nr_of_words_to_show")
 
 
-def plot_from_json(names, idf, ngrams, output_folder, nr_iterations_for_fine_ajusting_the_placement, nr_of_words_in_bar_plot):
-    json_datas = []
-    for title in names:
-        file_name = os.path.join(output_folder, construct_pdf_file_name(title, idf, ngrams, output_folder))
-        with open(file_name + ".json", "rt") as json_file:
-            json_datas.append(json_file.read())
-    """ # Was used for fine-tuning placement before, but probably not needed
-    for i in range(nr_iterations_for_fine_ajusting_the_placement):
-        print("Fine adjustment iteration: ", i)
-        for title,(i,json_data) in zip(names,enumerate(json_datas)):
-            json_datas[i] = plot_round(json_datas[i])
-    """
-    plot_from_plotdata(names, idf, ngrams, output_folder, json_datas, nr_of_words_in_bar_plot)
+    word_info_matrix, new_words_lists, min_x, max_x = vectorize_corpus(texts, names, word2vec_model, output_folder, params)
+    return word_info_matrix, new_words_lists, min_x, max_x, names
+
+def generate_plot(output_folder, word_info_matrix, new_words_lists, min_x, max_x, names, params):
+    if params.monospace:
+        matplotlib.rcParams["font.family"] = "monospace"
+    if pdfBackendEnabled:
+        pdfgen.registerDefaultFonts({
+            FONT_NORMAL: 'DejaVuSansMono.ttf',
+            FONT_EMPHASIZED: 'DejaVuSansMono-Bold.ttf',
+            FONT_NEWWORD: 'DejaVuSansMono-Oblique.ttf',
+        })
+
+    word_plot_info_matrix, actual_plotted_word_size_dict_list, max_scores, actual_min_x, actual_max_x = generate_plotdata(output_folder, word_info_matrix, names, new_words_lists, min_x, max_x, params)
+
+    # The calculations whether the words collide are made from size plot data that can only be retrieved from matplotlib after the actual plotting is done. Therefore, two plots have to be made, where the sizes from the first is used in the second.
+    images, cropboxes = plot_from_plotdata(output_folder, word_plot_info_matrix, names, new_words_lists, actual_plotted_word_size_dict_list, max_scores, min_x, max_x, actual_min_x, actual_max_x, params)
+    if output_folder is not None:
+        if params.unified_graph:
+            names = ["unified"]
+        for title, image in zip(names, images):
+            file_name = os.path.join(output_folder, construct_pdf_file_name(title, output_folder))
+            open(file_name, "wb").write(image.getbuffer())
+            print("Saved plot in " + file_name)
+    return images, cropboxes
+
+def generate_clouds(corpus_folder, word2vec_model, output_folder, corpus_texts=None, **kwargs):
+    params = Params(**kwargs)
+    if output_folder is not None and not os.path.exists(output_folder):
+        os.mkdir(output_folder)
+    word_info_matrix, new_words_lists, min_x, max_x, names = generate_clouds_vectorize(corpus_folder, word2vec_model, output_folder, params, corpus_texts=corpus_texts)
+    return generate_plot(output_folder, word_info_matrix, new_words_lists, min_x, max_x, names, params)

@@ -1,0 +1,8 @@
+numpy
+scipy
+scikit-learn
+gensim
+nltk
+matplotlib
+python-bidi
+reportlab
