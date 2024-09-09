@@ -1,5 +1,5 @@
 # Word Rain
-Code for generating word rains 
+The Word Rain visualization technique is a development of the classic word cloud that aims to retain the simplicity of the word cloud, while at the same time making it possible to use the text visualization for exploring and comparing corpora. 
 
 ![Example of word rains](word-rain-examples/unified-english-images-climate.png)
 <em>Example of word rains for IPCC reports.</em>
