@@ -7,7 +7,7 @@ The Word Rain visualization technique is a development of the classic word cloud
 ## Running 
 See `visualise_climate_texts.py` for an example of how the code in `wordrain/generate_wordrain.py` is to be used.
 
-You need a word2vec space, a stop word list and a corpus containing several sub-corpora. The folder CORPUS_FOLDER should contain sub-folders, which each of them contain the sub-corpora to be visualised. The sub-folders, in turn, contain (one or several) .txt-files, where the corpus is stored. The folder "swedish-climate-texts", gives an example of this structure. The Swedish word2vec space used in the example (model-sv.bin )can be found here: http://vectors.nlpl.eu/repository/
+You need a word2vec space, a stop word list and a corpus containing several sub-corpora. The folder CORPUS_FOLDER should contain sub-folders, which each of them contain the sub-corpora to be visualised. The sub-folders, in turn, contain (one or several) .txt-files, where the corpus is stored. The folder ``swedish-climate-texts`` provides an example of this structure. The Swedish word2vec space used in the example (model-sv.bin) can be found here: http://vectors.nlpl.eu/repository/
 
 ```
 WORD_SPACE_PATH = "./model-sv.bin"
@@ -39,11 +39,11 @@ Research and development of the Word Rain visualisation is thereby been funded b
 - Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
 - [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
 
-## Installations
+## Installation
 
 See [requirements.txt](requirements.txt)
 
-For a conda environment, the following is needed
+For a conda environment, the following is needed:
 
 conda install numpy
 
