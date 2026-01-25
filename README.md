@@ -16,7 +16,7 @@ CORPUS_FOLDER = "swedish-climate-texts"
 OUTPUT_FOLDER = "images_climate"
 ```
 ## Web service
-There is a web service, where word rains can be produced from uploaded and texts:
+There is a web service, where word rains can be produced from uploaded texts:
 [wordrain.org](https://wordrain.org)
 
 ## Contributors and funding
