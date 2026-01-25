@@ -48,7 +48,7 @@ The code has been tested on Python 3.12
 
 See [requirements.txt](requirements.txt)
 
-For a conda environment see: [conda.sh](conda.sh):
+For a conda environment see: [conda.sh](conda.sh)
 
 ## How to cite
 
