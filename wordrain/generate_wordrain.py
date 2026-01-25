@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from . import FONT_NORMAL, FONT_EMPHASIZED, FONT_NEWWORD, DEFAULT_FONTSIZE_FALLOFF_RATE
 
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.neighbors import NearestNeighbors
 import os
 import glob
@@ -250,7 +250,7 @@ def get_vector_for_word(word, word2vec_model, ngram_range):
         for sw in sub_words:
             vec_raw = get_vector_from_model(sw, word2vec_model)
             if type(vec_raw) == np.ndarray: # Not None
-                if ngram_range[0] == 1 and "_" not in word:
+                if ngram_range[0] == 1 and ngram_range[1] == 1 and "_" not in word:
                     acc_vector = vec_raw # This will lead to that only the last in a +1-gram
                 # will contribute to the vector. But otherwise the tsne space puts to much
                 # emphasis on the +1-grams
@@ -483,7 +483,7 @@ def do_plot(fig, sorted_word_scores_vec, title, min_x, max_x, max_score, new_wor
         if params.draw_vertical_bars:
             axes.plot([point.x, point.x], [y_bar_start, upwardbar_end], color=color_of_upward_bar, zorder = upward_bar_zorder, linewidth=linewidth)
             if params.plot_mushroom_head:
-                axes.scatter(point.x, upwardbar_end, zorder = mushroom_head_zorder, color=mushroom_head_color, marker = mushroom_head_marker, s=linewidth)
+                axes.scatter(point.x, upwardbar_end, zorder = mushroom_head_zorder, color=mushroom_head_color, marker = mushroom_head_marker, s=linewidth**(1/2))
 
 
 
@@ -641,10 +641,10 @@ def write_scores(output_folder, sorted_word_scores_matrix, names, new_words_list
         tf_name = os.path.join(texts_output, title + "-" + clean_folder_name(output_folder) + ".txt")
         with open(tf_name, "w") as tf_write:
             for sw in sws:
-                w_freq_proportional = round(1000*sw.relfreq, 1)
+                w_freq_proportional = round(1000*sw.relfreq, 3)
 
-                tf_write.write("\t".join([sw.word, str(sw.score), "(%.1f)" % sw.freq, "(%.1f)" % w_freq_proportional, str([sw.x,0])]) + "\n")
-
+                tf_write.write("\t".join([sw.word, str(sw.score), "%.0f" % sw.freq, "%.3f" % w_freq_proportional]) + "\n")
+        # , str([sw.x,0])
     for new_words_list, title in zip(new_words_lists, names):
         if title != ALL_FOLDERS_NAME:
             new_words_output = texts_output + "-new-words"
@@ -706,7 +706,14 @@ def vectorize_one_text(text, stopwords, params):
             # To count the total frequency for a word, in all texts
 
             freqs_for_entire_corpora[word] += freq_for_word
-    return freq_dict, freqs_for_entire_corpora
+            
+    count_total_nr_of_words_vectorizer = CountVectorizer()
+    count_transformed = count_total_nr_of_words_vectorizer.fit_transform([text])
+    
+    total_number_of_words = sum(count_transformed[0].toarray()[0])
+    
+    
+    return freq_dict, freqs_for_entire_corpora, total_number_of_words
 
 def vectorize_corpus(texts, names, word2vec_model, output_folder, params):
     stopwords = list(params.stopwords)
@@ -716,14 +723,18 @@ def vectorize_corpus(texts, names, word2vec_model, output_folder, params):
         
     freq_dict_list = [] # A list of word freqencies-dictionaries for each document
     freqs_for_entire_corpora = Counter()
+    total_number_of_words_list = [] # A list total number of words in each document
 
     vectorize_one_text_results = map(lambda text: vectorize_one_text(text, stopwords, params), texts)
-    for freq_dict, count in vectorize_one_text_results:
+    for freq_dict, count, total_number_of_words in vectorize_one_text_results:
         freqs_for_entire_corpora.update(count)
         freq_dict_list.append(freq_dict)
-
+        total_number_of_words_list.append(total_number_of_words)
+        
     # Create a vocabulary where all words with a frequencey < min_tf_in_corpora are excluded
     vocabulary_to_use = set([word for (word, freq) in freqs_for_entire_corpora.items() if freq >= params.min_tf_in_corpora])
+    
+    vocabulary_to_use = set([el for el in vocabulary_to_use if " " not in el or len(set(el.split(" "))) > 1]) # Not the same word several times in an n-gram
 
     if params.max_df != 1.0 or params.min_df > 1:
         print("before, max_df, min_df",  len(vocabulary_to_use))
@@ -757,12 +768,15 @@ def vectorize_corpus(texts, names, word2vec_model, output_folder, params):
     inversed = main_vectorizer.inverse_transform(X)
     vocabulary = main_vectorizer.vocabulary_
     
+    
     word_scores_per_graph_before_cutoff = []
-    for el, w, freq_dict in zip(inversed, X, freq_dict_list):
+    for el, w, freq_dict, total_number_of_words_for_document in zip(inversed, X, freq_dict_list, total_number_of_words_list):
         sum_all_word_frequencies = calculate_word_frequencies_sum(freq_dict)
+        print("sum_all_word_frequencies", sum_all_word_frequencies)
+        print("total_number_of_words_for_document", total_number_of_words_for_document)
         score_vec = w.toarray()[0]
         word_score_vec = [
-            WordScore(score_vec[vocabulary[word]], word, include_emphasized(word, params), freq_dict[word], freq_dict[word]/sum_all_word_frequencies)
+            WordScore(score_vec[vocabulary[word]], word, include_emphasized(word, params), freq_dict[word], freq_dict[word]/total_number_of_words_for_document)
             for word in el
         ]
         word_scores_per_graph_before_cutoff.append(word_score_vec)
