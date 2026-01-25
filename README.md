@@ -15,6 +15,9 @@ STOP_WORDS_LIST = "swedish_stopwords_climate.txt"
 CORPUS_FOLDER = "swedish-climate-texts"
 OUTPUT_FOLDER = "images_climate"
 ```
+## Web service
+There is a web service, where word rains can be produced from uploaded and texts:
+[wordrain.org](https://wordrain.org)
 
 ## Contributors and funding
 Word Rain is a collaboration between the [Centre for Digital Humanities and Social Sciences, Uppsala (CDHU)](https://www.abm.uu.se/cdhu-eng/), the [National Language Bank of Sweden/CLARIN Knowledge Centre for the Languages of Sweden](https://www.isof.se/other-languages/english/clarin-knowledge-centre-for-the-languages-of-sweden-swelang) at the Language Council of Sweden and the [iVis group](https://ivis.itn.liu.se) at Linköping University. The Word Rain is developed as an infrastructure component to support text exploration and comparison, and it is funded by three research infrastructures. Part of the development and practical evaluation of the Word Rain visualisation has also been conducted within the ActDisease project at the [Department of History of Science and Ideas](https://www.uu.se/en/department/history-of-science-and-ideas) and the [Centre for Medical Humanities]( https://www.uu.se/en/centre/medical-humanities.html).
@@ -38,28 +41,14 @@ Research and development of the Word Rain visualisation is thereby been funded b
 ## Presentations and blog posts  
 - Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
 - [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
+- [Höstworkshop i repris: Ordregn](https://sprakbanken.se/aktuellt/nyheter/2024-12-02-hostworkshop-i-repris-ordregn) (In Swedish)
 
 ## Installation
+The code has been tested on Python 3.12
 
 See [requirements.txt](requirements.txt)
 
-For a conda environment, the following is needed:
-
-conda install numpy
-
-conda install scipy
-
-conda install scikit-learn
-
-conda install gensim
-
-conda install nltk
-
-conda install matplotlib
-
-conda install -c conda-forge python-bidi
-
-conda install anaconda::reportlab
+For a conda environment see: [conda.sh](conda.sh):
 
 ## How to cite
 
