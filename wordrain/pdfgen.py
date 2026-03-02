@@ -1,4 +1,4 @@
-from . import FONT_NORMAL, FONT_EMPHASIZED, FONT_NEWWORD
+from . import FONT_NORMAL, FONT_EMPHASIZED, FONT_NEWWORD, FONT_EMPHASIZED_AND_NEW
 
 from reportlab.pdfgen import canvas
 from reportlab.pdfbase import pdfmetrics
@@ -16,6 +16,7 @@ fontstyle_to_fonttype = {
     ('normal', 'normal'): FONT_NORMAL,
     ('normal', 'bold'): FONT_EMPHASIZED,
     ('italic', 'normal'): FONT_NEWWORD,
+    ('italic', 'bold'): FONT_EMPHASIZED_AND_NEW
 }
 
 def registerFonts(fontlist):

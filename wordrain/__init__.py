@@ -1,6 +1,7 @@
 FONT_NORMAL = "normal"
 FONT_EMPHASIZED = "emphasized"
 FONT_NEWWORD = "newword"
+FONT_EMPHASIZED_AND_NEW = "emphasized_and_new"
 DEFAULT_FONTSIZE_FALLOFF_RATE = "DEFAULT_FONTSIZE_FALLOFF_RATE"
 
 from .generate_wordrain import choose_fonts
