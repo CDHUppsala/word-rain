@@ -390,7 +390,7 @@ class MatplotlibShimPdf():
         zorder = kwargs.get("zorder", 0)
         s=kwargs.get("s", 1)
         if marker == "o":
-            s = min(s, 0.3)
+            #s = min(s, 0.3)
             linewidth = max(s*4-0.3, 0.1)
             self.drawcommands.setdefault(zorder, []).append([
                 ("setLineWidth", [linewidth], {}),
