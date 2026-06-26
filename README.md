@@ -46,6 +46,10 @@ Research and development of the Word Rain visualisation has thereby been funded 
 - Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
 - [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
 - [Höstworkshop i repris: Ordregn](https://sprakbanken.se/aktuellt/nyheter/2024-12-02-hostworkshop-i-repris-ordregn) (In Swedish)
+- [CLARIN 2024 presentation: Word Rain as a Service](https://www.youtube.com/watch?v=6gCMCgYgV_k&t=5526s) (YouTube)
+- [Lightning talk at the 39th Chaos Communication Congress](http://creativecommons.org/licenses/by/4.0) (2025)
+    License: CC-BY Chaos Computer Club e.V
+
 
 ## Installation
 The code has been tested on Python 3.12
