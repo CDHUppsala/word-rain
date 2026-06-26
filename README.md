@@ -37,7 +37,7 @@ Research and development of the Word Rain visualisation has thereby been funded 
 - Skeppstedt M., Ahltorp M., Kucher K., Lindström M. (2024) [From Word Clouds to Word Rain: Revisiting the Classic Word Cloud to Visualize Climate Change Texts](https://journals.sagepub.com/doi/10.1177/14738716241236188) Information Visualization. 
 
 ## Conference abstracts
--  Ginnerskov J., Hellman M., Skeppstedt M. (2025) Modeling the Emergence of a Collaborative Modus Operandi: The Case of “Samverkan” in Swedish Governance, 11th International Conference on Computational Social Science (IC2S2’25)
+-  Ginnerskov J., Hellman M., Skeppstedt M. (2025) [Modeling the Emergence of a Collaborative Modus Operandi: The Case of “Samverkan” in Swedish Governance](https://ic2s2-2025.org/program/), 11th International Conference on Computational Social Science (IC2S2’25)
 - Ahltorp A. & Skeppstedt M. (2024). [1 1/2 years of developing Word Rain](https://sltc2024.github.io/abstracts/ahltorp.pdf). Extended abstract presented at Swedish Language Technology Conference
 - Skeppstedt M. & Ahltorp, M (2023) [The Words of Climate Change: TF-IDF-based word clouds derived from climate change reports](https://www.youtube.com/watch?v=nB7E74mQuvI&list=PLtf-Q_ioF5okILlWILULllKVhaBYW4xug&index=1). Poster at Digital Humanities in the Nordic and Baltic Countries
 - Rosenbaum P  & Skeppstedt M (2023) [Text Mining on Applications for Cultural Funding](https://www.clarin.eu/content/clarin-bazaar-2023). CLARIN Bazaar poster. CLARIN Annual Conference, Leuven
