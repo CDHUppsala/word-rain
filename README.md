@@ -43,13 +43,12 @@ Research and development of the Word Rain visualisation has thereby been funded 
 - Skeppstedt, M., Aangenendt, G., & Söderfeldt, Y. (2024) [Visualizing longitudinal trends in digitized periodicals from the Swedish Diabetes Association](http://www.diva-portal.org/smash/record.jsf?pid=diva2%3A1833417&dswid=936). Presentation at the Huminfra Conference
 
 ## Presentations and blog posts  
-- Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
-- [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
-- [Höstworkshop i repris: Ordregn](https://sprakbanken.se/aktuellt/nyheter/2024-12-02-hostworkshop-i-repris-ordregn) (In Swedish)
-- [CLARIN 2024 presentation: Word Rain as a Service](https://www.youtube.com/watch?v=6gCMCgYgV_k&t=5526s) (YouTube)
 - [Lightning talk at the 39th Chaos Communication Congress](https://wordrain.org/video-39c3-wordrain) (2025)
     License: [CC-BY]((http://creativecommons.org/licenses/by/4.0)) Chaos Computer Club e.V
-
+- [CLARIN 2024 presentation: Word Rain as a Service](https://www.youtube.com/watch?v=6gCMCgYgV_k&t=5526s) (YouTube)
+- [Höstworkshop i repris: Ordregn](https://sprakbanken.se/aktuellt/nyheter/2024-12-02-hostworkshop-i-repris-ordregn) (In Swedish)
+- [Ordregn – en utveckling av det klassiska ordmolnet](https://sprakbanken.se/aktuellt/nyheter/2024-05-30-ordregn---en-utveckling-av-det-klassiska-ordmolnet) (In Swedish)
+- Utbildningsradion (2024) from [Språkrådsdagen](https://urplay.se/program/237963-sprakradsdagen-2024-ordregn-visualisering-av-klimatprat) (In Swedish)
 
 ## Installation
 The code has been tested on Python 3.12
