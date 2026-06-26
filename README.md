@@ -29,11 +29,15 @@ Research and development of the Word Rain visualisation has thereby been funded 
 - [ActDisease](https://www.actdisease.org): Acting out Disease: How Patient Organizations Shaped Modern Medicine: ERC Starting Grant (ERC-2021-STG 101040999)
 
 ## Peer-reviewed publications
-- Ahltorp A., Hessel J., Eriksson G., Skeppstedt M. (2024) Visualisering av ett lexikons täckning av olika textgenrer: Experiment med en jiddischordbok Accepted for publication in: Nordiske Studier i Leksikografi (In Swedish)
+- Skeppstedt M., Ahltorp M., Kucher K., Aangenendt G., Lindström M. & Söderfeldt Y. (2025). [The Word Rain visualisation technique applied to digital history: How to visualise, explore and compare texts using semantically structured word clouds](https://dspace.ut.ee/items/76999ecc-19ca-4daf-9e3c-17984d0907c5). In Huminfra handbook: Empowering digital and experimental humanities. (NEALT Proceedings Series 59)
+- Ahltorp M. & Skeppstedt M. (2025) [Word Rain as a service: Making semantically structured word clouds available to everyone] (https://doi.org/10.3384/ecp216). Selected papers from the CLARIN annual conference 2024
+- Skeppstedt, M., Ahltorp, M., Aangenendt, G., & Söderfeldt, Y. (2025). [Further Developing the Word Rain Text Visualisation Technique in a Digital History Project](https://doi.org/10.5617/dhnbpub.12292). Digital Humanities in the Nordic and Baltic Countries Publications. 
+- Ahltorp A., Hessel J., Eriksson G., Skeppstedt M. (Accepted for publication) Visualisering av ett lexikons täckning av olika textgenrer: Experiment med en jiddischordbok Accepted for publication in: Nordiske Studier i Leksikografi (In Swedish)
 - Skeppstedt M., Aangenendt G. (2024) [Using the Word Rain Technique to Visualize Longitudinal Changes in Periodicals from the Swedish Diabetes Association]( https://diglib.eg.org/items/ce672e07-4c92-4874-9c94-fda406b2e339). Proceedings of Vis4NLP’24 – Visualization for Natural Language Processing (EuroVis 2024)
-- Skeppstedt M., Ahltorp M., Kucher K., Lindström M. (2024) [From Word Clouds to Word Rain: Revisiting the Classic Word Cloud to Visualize Climate Change Texts](https://journals.sagepub.com/doi/10.1177/14738716241236188). 
+- Skeppstedt M., Ahltorp M., Kucher K., Lindström M. (2024) [From Word Clouds to Word Rain: Revisiting the Classic Word Cloud to Visualize Climate Change Texts](https://journals.sagepub.com/doi/10.1177/14738716241236188) Information Visualization. 
 
 ## Conference abstracts
+- Ahltorp, A. & Skeppstedt M. (2024). [1 1/2 years of developing Word Rain](https://sltc2024.github.io/abstracts/ahltorp.pdf). Extended abstract presented at Swedish Language Technology Conference
 - Skeppstedt, M. & Ahltorp, M (2023) [The Words of Climate Change: TF-IDF-based word clouds derived from climate change reports](https://www.youtube.com/watch?v=nB7E74mQuvI&list=PLtf-Q_ioF5okILlWILULllKVhaBYW4xug&index=1). Poster at Digital Humanities in the Nordic and Baltic Countries
 - Rosenbaum, P  & Skeppstedt, M (2023) [Text Mining on Applications for Cultural Funding](https://www.clarin.eu/content/clarin-bazaar-2023). CLARIN Bazaar poster. CLARIN Annual Conference, Leuven
 - Skeppstedt, M., Aangenendt, G., & Söderfeldt, Y. (2024) [Visualizing longitudinal trends in digitized periodicals from the Swedish Diabetes Association](http://www.diva-portal.org/smash/record.jsf?pid=diva2%3A1833417&dswid=936). Presentation at the Huminfra Conference
