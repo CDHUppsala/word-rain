@@ -40,9 +40,10 @@ Research and development of the Word Rain visualisation has thereby been funded 
 -  Ahltorp A. (2025) [Using Word Rain to visualise ParlaMint debates between countries](https://www.clarin.eu/sites/default/files/CLARIN2025_ConferenceProceedings.pdf). In Proceedings from CLARIN Annual Conference 2025.
 -  Ginnerskov J., Hellman M., Skeppstedt M. (2025) [Modeling the Emergence of a Collaborative Modus Operandi: The Case of “Samverkan” in Swedish Governance](https://ic2s2-2025.org/program/), 11th International Conference on Computational Social Science (IC2S2’25)
 - Ahltorp A. & Skeppstedt M. (2024). [1 1/2 years of developing Word Rain](https://sltc2024.github.io/abstracts/ahltorp.pdf). Extended abstract presented at Swedish Language Technology Conference
+- Skeppstedt M., Aangenendt G., & Söderfeldt Y. (2024) [Visualizing longitudinal trends in digitized periodicals from the Swedish Diabetes Association](http://www.diva-portal.org/smash/record.jsf?pid=diva2%3A1833417&dswid=936). Presentation at the Huminfra Conference
 - Skeppstedt M. & Ahltorp, M (2023) [The Words of Climate Change: TF-IDF-based word clouds derived from climate change reports](https://www.youtube.com/watch?v=nB7E74mQuvI&list=PLtf-Q_ioF5okILlWILULllKVhaBYW4xug&index=1). Poster at Digital Humanities in the Nordic and Baltic Countries
 - Rosenbaum P  & Skeppstedt M (2023) [Text Mining on Applications for Cultural Funding](https://www.clarin.eu/content/clarin-bazaar-2023). CLARIN Bazaar poster. CLARIN Annual Conference, Leuven
-- Skeppstedt M., Aangenendt G., & Söderfeldt Y. (2024) [Visualizing longitudinal trends in digitized periodicals from the Swedish Diabetes Association](http://www.diva-portal.org/smash/record.jsf?pid=diva2%3A1833417&dswid=936). Presentation at the Huminfra Conference
+
 
 ## Presentations and blog posts  
 - [Lightning talk at the 39th Chaos Communication Congress](https://wordrain.org/video-39c3-wordrain) (2025)
