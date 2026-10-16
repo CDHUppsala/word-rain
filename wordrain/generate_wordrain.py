@@ -262,11 +262,11 @@ def get_vector_for_word(word, word2vec_model, ngram_range):
             if type(compound_vector) == np.ndarray:
                 acc_vector = compound_vector
         if type(acc_vector) == np.ndarray: #Found compound vector
-            return norm_vector(vec_raw)
+            return norm_vector(acc_vector)
             
     compound_vector = get_compound_vector(word, word2vec_model)
     if type(compound_vector) == np.ndarray:
-        return norm_vector(vec_raw)
+        return norm_vector(compound_vector)
     
     for i in range(0, len(word)):
         for l in letters:
