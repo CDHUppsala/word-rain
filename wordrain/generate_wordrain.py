@@ -229,17 +229,14 @@ def get_vector_from_model(word, model):
     
 def get_vector_for_word(word, word2vec_model, ngram_range):
     vec_raw = get_vector_from_model(word, word2vec_model)
+    norm_vector = lambda vec_raw: preprocessing.normalize(vec_raw.reshape(1, -1), norm='l2')[0].tolist()
     if type(vec_raw) == np.ndarray: # Not None
-        length = vec_raw.shape[0]
-        norm_vector = list(preprocessing.normalize(np.reshape(vec_raw, newshape = (1, length)), norm='l2')[0])
-        return norm_vector
+        return norm_vector(vec_raw)
     
     # try with lower_case_version
     vec_raw = get_vector_from_model(word.lower(), word2vec_model)
     if type(vec_raw) == np.ndarray: # Not None
-        length = vec_raw.shape[0]
-        norm_vector = list(preprocessing.normalize(np.reshape(vec_raw, newshape = (1, length)), norm='l2')[0])
-        return norm_vector
+        return norm_vector(vec_raw)
         
     if " " in word or "_" in word:
         if " " in word:
@@ -265,15 +262,11 @@ def get_vector_for_word(word, word2vec_model, ngram_range):
             if type(compound_vector) == np.ndarray:
                 acc_vector = compound_vector
         if type(acc_vector) == np.ndarray: #Found compound vector
-            length = acc_vector.shape[0]
-            norm_vector = list(preprocessing.normalize(np.reshape(acc_vector, newshape = (1, length)), norm='l2')[0])
-            return norm_vector
+            return norm_vector(vec_raw)
             
     compound_vector = get_compound_vector(word, word2vec_model)
     if type(compound_vector) == np.ndarray:
-        length = compound_vector.shape[0]
-        norm_vector = list(preprocessing.normalize(np.reshape(compound_vector, newshape = (1, length)), norm='l2')[0])
-        return norm_vector
+        return norm_vector(vec_raw)
     
     for i in range(0, len(word)):
         for l in letters:
@@ -281,9 +274,7 @@ def get_vector_for_word(word, word2vec_model, ngram_range):
             if edited_word in word2vec_model:
                 #print("found", word, edited_word)
                 vec_raw = word2vec_model[edited_word]
-                length = vec_raw.shape[0]
-                norm_vector = list(preprocessing.normalize(np.reshape(vec_raw, newshape = (1, length)), norm='l2')[0])
-                return norm_vector
+                return norm_vector(vec_raw)
                 
     print("No word2vec vector found for:", word)
     return None
